@@ -40,7 +40,7 @@ jobs:
           cp target/${{ matrix.target }}/release/smartlog dist/smartlog-${{ matrix.name }}
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: binaries
           path: dist/*
@@ -49,7 +49,7 @@ jobs:
     needs: build-release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: binaries
 
