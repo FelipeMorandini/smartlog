@@ -7,7 +7,7 @@ A blazing-fast terminal UI (TUI) for tailing and filtering log files in real-tim
 
 Perfect for developers, DevOps engineers, and anyone who works with application logs daily.
 
-![SmartLog Demo](https://via.placeholder.com/800x400?text=SmartLog+Demo)
+![SmartLog Demo](.github/assets/demo.gif)
 
 ## ✨ Features
 
