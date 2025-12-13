@@ -1,0 +1,112 @@
+use ratatui::style::{Color, Style, Modifier};
+use ratatui::text::{Line, Span};
+use serde_json::Value;
+
+#[derive(PartialEq, Debug, Clone)]
+pub enum LogLevel {
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Unknown,
+}
+
+#[derive(Clone, Debug)]
+pub struct LogEntry {
+    pub raw: String,
+    pub pretty: String,
+    pub level: LogLevel,
+}
+
+/// Parses a raw string line. If it's JSON, pretty prints it and finds the level.
+pub fn parse_log(line: String) -> LogEntry {
+    match serde_json::from_str::<Value>(&line) {
+        Ok(json) => {
+            // Try to guess the level from common JSON fields
+            let level = if let Some(lvl) = json.get("level").and_then(|v| v.as_str()) {
+                match lvl.to_lowercase().as_str() {
+                    "error" | "err" | "fatal" => LogLevel::Error,
+                    "warn" | "warning" => LogLevel::Warn,
+                    "info" | "information" => LogLevel::Info,
+                    "debug" | "trace" => LogLevel::Debug,
+                    _ => LogLevel::Unknown,
+                }
+            } else {
+                LogLevel::Unknown
+            };
+
+            LogEntry {
+                raw: line,
+                pretty: serde_json::to_string_pretty(&json).unwrap_or_default(),
+                level,
+            }
+        }
+        Err(_) => {
+            // Check for plain text keywords if not JSON
+            let lower = line.to_lowercase();
+            let level = if lower.contains("error") {
+                LogLevel::Error
+            } else if lower.contains("warn") {
+                LogLevel::Warn
+            } else if lower.contains("info") {
+                LogLevel::Info
+            } else {
+                LogLevel::Unknown
+            };
+
+            LogEntry {
+                raw: line.clone(),
+                pretty: line,
+                level,
+            }
+        }
+    }
+}
+
+/// Styles a log entry into Ratatui spans, highlighting search matches.
+pub fn style_log<'a>(entry: &'a LogEntry, search_query: &str) -> Line<'a> {
+    let base_color = match entry.level {
+        LogLevel::Error => Color::Red,
+        LogLevel::Warn => Color::Yellow,
+        LogLevel::Info => Color::Green,
+        LogLevel::Debug => Color::Blue,
+        LogLevel::Unknown => Color::White,
+    };
+
+    let base_style = Style::default().fg(base_color);
+
+    // If no search query, return the whole line colored
+    if search_query.is_empty() {
+        return Line::from(Span::styled(&entry.pretty, base_style));
+    }
+
+    // Highlighting Logic
+    let mut spans = Vec::new();
+    let content = &entry.pretty;
+    let lower_content = content.to_lowercase();
+    let lower_query = search_query.to_lowercase();
+
+    let mut last_idx = 0;
+
+    for (idx, _) in lower_content.match_indices(&lower_query) {
+        // Push text before the match
+        if idx > last_idx {
+            spans.push(Span::styled(&content[last_idx..idx], base_style));
+        }
+
+        // Push the match (Highlighted)
+        spans.push(Span::styled(
+            &content[idx..idx + lower_query.len()],
+            Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD),
+        ));
+
+        last_idx = idx + lower_query.len();
+    }
+
+    // Push remaining text
+    if last_idx < content.len() {
+        spans.push(Span::styled(&content[last_idx..], base_style));
+    }
+
+    Line::from(spans)
+}
