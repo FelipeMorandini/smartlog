@@ -1,7 +1,13 @@
+//! Log parsing and styling utilities.
+//!
+//! This module provides functionality to parse JSON and plain text log entries,
+//! detect log levels, and style them for terminal display with syntax highlighting.
+
 use ratatui::style::{Color, Style, Modifier};
 use ratatui::text::{Line, Span};
 use serde_json::Value;
 
+/// Log severity level.
 #[derive(PartialEq, Debug, Clone)]
 pub enum LogLevel {
     Error,
@@ -11,14 +17,23 @@ pub enum LogLevel {
     Unknown,
 }
 
+/// A parsed log entry with its original text, pretty-printed version, and severity level.
 #[derive(Clone, Debug)]
 pub struct LogEntry {
+    /// The original raw log line
     pub raw: String,
+    /// Pretty-printed version (formatted JSON or original text)
     pub pretty: String,
+    /// Detected log level
     pub level: LogLevel,
 }
 
-/// Parses a raw string line. If it's JSON, pretty prints it and finds the level.
+/// Parses a raw log line into a structured `LogEntry`.
+///
+/// If the line is valid JSON, it will be pretty-printed and the log level
+/// will be extracted from common fields (e.g., "level", "severity").
+/// Otherwise, the line is treated as plain text and the level is guessed
+/// from keywords like "error", "warn", "info".
 pub fn parse_log(line: String) -> LogEntry {
     match serde_json::from_str::<Value>(&line) {
         Ok(json) => {
@@ -63,7 +78,15 @@ pub fn parse_log(line: String) -> LogEntry {
     }
 }
 
-/// Styles a log entry into Ratatui spans, highlighting search matches.
+/// Styles a log entry for terminal display with syntax highlighting.
+///
+/// Colors the log based on its severity level and highlights any matches
+/// to the search query with a cyan background.
+///
+/// # Arguments
+///
+/// * `entry` - The log entry to style
+/// * `search_query` - Text to highlight (case-insensitive)
 pub fn style_log<'a>(entry: &'a LogEntry, search_query: &str) -> Line<'a> {
     let base_color = match entry.level {
         LogLevel::Error => Color::Red,

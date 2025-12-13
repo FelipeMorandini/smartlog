@@ -1,13 +1,26 @@
+//! Terminal UI rendering.
+//!
+//! This module handles all the terminal UI rendering using the Ratatui library.
+
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Alignment},
-    style::{Color, Style, Modifier},
-    text::Span,
+    layout::{Constraint, Direction, Layout},
+    style::{Color, Style},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
 use crate::app::{App, InputMode};
 use crate::parser::style_log;
 
+/// Renders the application UI to the terminal.
+///
+/// The UI consists of two sections:
+/// - Main log area with filtered and styled logs
+/// - Input bar showing the current search query and mode
+///
+/// # Arguments
+///
+/// * `f` - The Ratatui frame to render to
+/// * `app` - The current application state
 pub fn ui(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)

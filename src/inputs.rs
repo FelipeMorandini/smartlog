@@ -1,6 +1,20 @@
+//! Keyboard input handling for the application.
+
 use crossterm::event::{KeyCode, KeyEvent};
 use crate::app::{App, InputMode};
 
+/// Handles keyboard input events and updates the application state.
+///
+/// # Arguments
+///
+/// * `app` - The application state
+/// * `key` - The keyboard event to handle
+///
+/// # Behavior
+///
+/// **Normal mode**: `q` quits, `/` enters editing, `k`/`j` or arrows scroll, `Esc` clears search
+///
+/// **Editing mode**: `Enter`/`Esc` exits editing, characters are added to input buffer
 pub fn handle_key_event(app: &mut App, key: KeyEvent) {
     match app.input_mode {
         InputMode::Normal => match key.code {

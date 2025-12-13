@@ -1,3 +1,8 @@
+//! SmartLog - A terminal UI for tailing and filtering JSON logs.
+//!
+//! This is the main binary entry point that sets up the terminal,
+//! spawns the log ingestion task, and runs the main event loop.
+
 use anyhow::Result;
 use clap::Parser;
 use crossterm::{
@@ -85,6 +90,13 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Runs the main application event loop.
+///
+/// This function handles two types of events:
+/// - Incoming log messages from the channel
+/// - User keyboard input
+///
+/// The loop terminates when `app.should_quit` is set to `true`.
 async fn run_app<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,
