@@ -1,10 +1,20 @@
 [package]
 name = "smartlog"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 authors = ["Felipe Pires Morandini <felipepiresmorandini@gmail.com>"]
 description = "A high-performance TUI for log tailing. Auto-detects JSON, syntax highlights errors, and filters streams in real-time. Built in Rust."
 license = "MIT"
+repository = "https://github.com/felipemorandini/smartlog"
+homepage = "https://github.com/felipemorandini/smartlog"
+documentation = "https://github.com/felipemorandini/smartlog#readme"
+readme = "README.md"
+keywords = ["tui", "log", "tail", "json", "viewer"]
+categories = ["command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "smartlog"
+path = "src/bin/smartlog.rs"
 
 [dependencies]
 anyhow = "1.0.100"
@@ -14,3 +24,10 @@ ratatui = "0.29.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 tokio = { version = "1.48.0", features = ["full"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+

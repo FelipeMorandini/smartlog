@@ -1,106 +1,90 @@
-# SmartLog 🚀
+<div align="center">
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+# SmartLog
 
-A blazing-fast terminal UI (TUI) for tailing and filtering log files in real-time. SmartLog automatically detects JSON logs, pretty-prints them, syntax highlights by log level, and provides powerful filtering capabilities—all within an elegant, responsive terminal interface.
+A fast, ergonomic terminal UI for tailing and filtering JSON and plain-text logs in real time.
 
-Perfect for developers, DevOps engineers, and anyone who works with application logs daily.
+Built with Rust • Async I/O with Tokio • Beautiful TUI with Ratatui.
 
-![SmartLog Demo](.github/assets/demo.gif)
+</div>
+
+---
 
 ## ✨ Features
 
-- 🎨 **Automatic JSON Detection & Pretty-Printing** - Detects JSON log entries and formats them beautifully
-- 🌈 **Syntax Highlighting** - Color-coded by log level (ERROR, WARN, INFO, DEBUG)
-- 🔍 **Real-Time Filtering** - Filter logs as they stream with instant search
-- 🔄 **Auto-Follow Mode** - Automatically scrolls to show newest logs (like `tail -f`)
-- ⚡ **High Performance** - Built in Rust with async I/O for minimal resource usage
-- 📜 **Scroll History** - Navigate through up to 2,000 recent log entries
-- 🎯 **Search Highlighting** - Matched search terms are highlighted with a distinct background
-- 🖥️ **Cross-Platform** - Works on macOS (Intel & Apple Silicon) and Linux
+- Auto-detects JSON vs. plain text
+- Pretty-prints JSON with level coloring
+- Live filtering with instant highlight (`/` to search)
+- Smooth scrolling with follow mode
+- Tails files like `tail -f` (handles truncation/rotation)
+- Reads from stdin for easy piping: `tail -f app.log | smartlog`
+- Graceful shutdown on Ctrl+C and SIGTERM (Unix), terminal restored every time
 
-## 📦 Installation
+## 🚀 Installation
 
-### macOS
+### Pre-built Binaries (Recommended)
 
-#### Homebrew (Recommended)
+Download the latest release for your platform from the [Releases](https://github.com/felipemorandini/smartlog/releases) page:
 
+**macOS (Apple Silicon):**
 ```bash
-brew tap felipemorandini/smartlog
-brew install smartlog
+curl -L https://github.com/felipemorandini/smartlog/releases/latest/download/smartlog-macos-silicon -o smartlog
+chmod +x smartlog
+sudo mv smartlog /usr/local/bin/
 ```
 
-#### Direct Download
-
-Download the latest release for your architecture:
-
-**Apple Silicon (M1/M2/M3):**
+**macOS (Intel):**
 ```bash
-curl -LO https://github.com/felipemorandini/smartlog/releases/latest/download/smartlog-macos-silicon
-chmod +x smartlog-macos-silicon
-sudo mv smartlog-macos-silicon /usr/local/bin/smartlog
+curl -L https://github.com/felipemorandini/smartlog/releases/latest/download/smartlog-macos-intel -o smartlog
+chmod +x smartlog
+sudo mv smartlog /usr/local/bin/
 ```
 
-**Intel:**
+**Linux (x86_64):**
 ```bash
-curl -LO https://github.com/felipemorandini/smartlog/releases/latest/download/smartlog-macos-intel
-chmod +x smartlog-macos-intel
-sudo mv smartlog-macos-intel /usr/local/bin/smartlog
+curl -L https://github.com/felipemorandini/smartlog/releases/latest/download/smartlog-linux-amd64 -o smartlog
+chmod +x smartlog
+sudo mv smartlog /usr/local/bin/
 ```
 
-### Linux
+### Using Cargo
 
-#### APT (Debian/Ubuntu)
+If you have Rust installed:
 
 ```bash
-# Add repository (coming soon)
-sudo add-apt-repository ppa:felipemorandini/smartlog
-sudo apt update
-sudo apt install smartlog
+cargo install --git https://github.com/felipemorandini/smartlog
 ```
 
-#### Direct Download
+### Building from Source
 
 ```bash
-curl -LO https://github.com/felipemorandini/smartlog/releases/latest/download/smartlog-linux-amd64
-chmod +x smartlog-linux-amd64
-sudo mv smartlog-linux-amd64 /usr/local/bin/smartlog
-```
-
-### From Source
-
-Requires [Rust](https://www.rust-lang.org/tools/install) 1.70 or later:
-
-```bash
-git clone https://github.com/felipemorandini/smartlog.git
+git clone https://github.com/felipemorandini/smartlog
 cd smartlog
-cargo install --path .
+cargo build --release
+# Binary will be at: target/release/smartlog
 ```
 
-## 🚀 Usage
-
-### Basic Usage
-
-Start SmartLog with a demo log stream:
-
-```bash
-smartlog
-```
+## 🔧 Quick Start
 
 Tail a specific log file:
 
-```bash
+```
 smartlog --file /var/log/myapp.log
 ```
 
 Or pipe logs directly:
 
-```bash
+```
 tail -f /var/log/app.log | smartlog
 ```
 
-### Keyboard Shortcuts
+### Input Sources and Behavior
+
+- When using `--file`, SmartLog tails from the end of the file and follows new lines (similar to `tail -f`). If the file is truncated/rotated, it continues from the beginning of the new file.
+- When no `--file` is provided, SmartLog automatically reads from stdin if it is piped; otherwise it starts a demo stream.
+- Press Ctrl+C to exit gracefully. On Unix, receiving SIGTERM also exits gracefully and restores the terminal state.
+
+## ⌨️ Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
@@ -110,7 +94,7 @@ tail -f /var/log/app.log | smartlog
 | `↓` or `j` | Scroll down |
 | `q` | Quit application |
 
-### Filter Mode
+## 🔎 Filter Mode
 
 1. Press `/` to enter filter mode
 2. Type your search query (case-insensitive)
@@ -153,10 +137,30 @@ Keywords: `error`, `warn`, `info` (case-insensitive)
 
 SmartLog is built with modern Rust async patterns:
 
-- **Tokio** - Async runtime for non-blocking I/O
-- **Ratatui** - Terminal UI framework
-- **Crossterm** - Cross-platform terminal manipulation
-- **Serde JSON** - Fast JSON parsing and pretty-printing
+- **Tokio** — Async runtime for non-blocking I/O
+- **Ratatui** — Terminal UI framework
+- **Crossterm** — Cross-platform terminal manipulation
+- **Serde JSON** — Fast JSON parsing and pretty-printing
+
+### Performance
+
+- **Zero-copy streaming**: Logs are processed as they arrive without blocking
+- **Efficient buffering**: Maintains last 2000 logs in memory (configurable in code)
+- **Async I/O**: File tailing and terminal rendering happen concurrently
+- **Fast JSON parsing**: Uses serde_json for high-performance parsing
+
+### Reliability
+
+- **Graceful shutdown**: Handles SIGINT (Ctrl+C) and SIGTERM cleanly
+- **Terminal restoration**: Always restores terminal state, even on panic
+- **File rotation handling**: Automatically detects and recovers from log rotation
+- **Error recovery**: Continues running even if temporary errors occur
+
+## 🧰 Troubleshooting
+
+- If nothing appears when you run `smartlog` without `--file`, make sure you're piping input (e.g., `... | smartlog`). If stdin is a TTY and no file is provided, SmartLog shows a demo stream.
+- Permissions: ensure `smartlog` has read access to any files you tail.
+- Windows: make sure your terminal supports the necessary VT sequences (Windows 10+ typically works).
 
 ## 🤝 Contributing
 
@@ -170,7 +174,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## 📝 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
 
 ## 🐛 Bug Reports & Feature Requests
 
@@ -184,7 +188,7 @@ Found a bug or have a feature request? Please [open an issue](https://github.com
 
 ## 🙏 Acknowledgments
 
-- Built with [Ratatui](https://github.com/ratatui-org/ratatui) - An amazing TUI framework
+- Built with [Ratatui](https://github.com/ratatui-org/ratatui) — An amazing TUI framework
 - Inspired by tools like `tail`, `less`, and `jq`
 
 ---
@@ -192,4 +196,3 @@ Found a bug or have a feature request? Please [open an issue](https://github.com
 <div align="center">
 Made with ❤️ and Rust 🦀
 </div>
-

@@ -1,5 +1,6 @@
 //! Application state management and core logic.
 
+use crate::config::MAX_LOG_BUFFER_SIZE;
 use crate::parser::LogEntry;
 use std::collections::VecDeque;
 
@@ -18,7 +19,7 @@ pub struct App {
     pub input_mode: InputMode,
     /// User input buffer for search queries
     pub input_buffer: String,
-    /// Rolling buffer of log entries (max 2000)
+    /// Rolling buffer of log entries
     pub logs: VecDeque<LogEntry>,
     /// Current scroll position
     pub scroll: usize,
@@ -30,13 +31,19 @@ pub struct App {
     pub logs_processed: usize,
 }
 
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl App {
     /// Creates a new `App` instance with default values.
     pub fn new() -> App {
         App {
             input_mode: InputMode::Normal,
             input_buffer: String::new(),
-            logs: VecDeque::with_capacity(2000), // Keep last 2000 logs in memory
+            logs: VecDeque::with_capacity(MAX_LOG_BUFFER_SIZE),
             scroll: 0,
             auto_scroll: true,
             should_quit: false,
@@ -46,9 +53,9 @@ impl App {
 
     /// Adds a new log entry to the buffer.
     ///
-    /// If the buffer exceeds 2000 entries, the oldest entry is removed.
+    /// If the buffer exceeds the configured maximum size, the oldest entry is removed.
     pub fn on_log(&mut self, entry: LogEntry) {
-        if self.logs.len() >= 2000 {
+        if self.logs.len() >= MAX_LOG_BUFFER_SIZE {
             self.logs.pop_front();
         }
         self.logs.push_back(entry);
