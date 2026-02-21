@@ -79,7 +79,7 @@ fn spawn_tail_file(path: PathBuf, tx: mpsc::Sender<String>) -> JoinHandle<()> {
                         match fs::File::open(&path).await {
                             Ok(file) => {
                                 let mut reader = BufReader::new(file);
-                                if let Ok(_) = reader.seek(SeekFrom::Start(offset)).await {
+                                if reader.seek(SeekFrom::Start(offset)).await.is_ok() {
                                     loop {
                                         buf.clear();
                                         match reader.read_line(&mut buf).await {
@@ -101,8 +101,8 @@ fn spawn_tail_file(path: PathBuf, tx: mpsc::Sender<String>) -> JoinHandle<()> {
                                             }
                                         }
                                     }
-                                    // Update offset to current len after reading
-                                    offset = len;
+                                    // Update offset to actual reader position after reading
+                                    offset = reader.stream_position().await.unwrap_or(len);
                                 }
                             }
                             Err(e) => {

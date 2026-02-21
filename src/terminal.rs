@@ -19,7 +19,7 @@ impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
         let mut w = io::stdout();
-        let _ = execute!(w, LeaveAlternateScreen, DisableMouseCapture);
+        let _ = execute!(w, crossterm::cursor::Show, LeaveAlternateScreen, DisableMouseCapture);
     }
 }
 
