@@ -30,20 +30,19 @@ pub fn ui(f: &mut Frame, app: &App) {
         ])
         .split(f.area());
 
-    // --- 1. Filter Logs ---
+    // --- 1. Filter Logs (using centralized filtering) ---
     let query = &app.input_buffer;
-    let filtered_logs: Vec<_> = app.logs
-        .iter()
-        .filter(|log| query.is_empty() || log.pretty.to_lowercase().contains(&query.to_lowercase()))
-        .collect();
+    let filtered_logs = app.get_filtered_logs();
 
     // --- 2. Calculate Scroll ---
-    // If auto_scroll is true, we force scroll to the end of the filtered list
-    let scroll_pos = if app.auto_scroll {
-        filtered_logs.len().saturating_sub(chunks[0].height as usize) as u16
+    // ratatui 0.29's Paragraph::scroll() takes (u16, u16).
+    // Clamp to u16::MAX to handle edge cases with very large wrapped content.
+    let raw_scroll = if app.auto_scroll {
+        filtered_logs.len().saturating_sub(chunks[0].height as usize)
     } else {
-        app.scroll as u16
+        app.scroll
     };
+    let scroll_pos = raw_scroll.min(u16::MAX as usize) as u16;
 
     // --- 3. Render Logs ---
     let styled_logs: Vec<_> = filtered_logs
@@ -65,7 +64,13 @@ pub fn ui(f: &mut Frame, app: &App) {
     };
 
     let status_text = if app.auto_scroll { "FOLLOWING" } else { "PAUSED" };
-    let title = format!(" Filter (Press /) | {} ", status_text);
+    let total = app.logs.len();
+    let shown = filtered_logs.len();
+    let title = if app.input_buffer.is_empty() {
+        format!(" Filter (Press /) | {} | {} logs ", status_text, total)
+    } else {
+        format!(" Filter (Press /) | {} | {}/{} matches ", status_text, shown, total)
+    };
 
     let input_block = Paragraph::new(app.input_buffer.as_str())
         .style(input_style)

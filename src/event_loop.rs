@@ -5,14 +5,14 @@
 //! - User keyboard input
 //! - OS shutdown signals
 
-use std::{io, time::Duration, future::Future};
-use crossterm::event::{self, Event};
+use std::{io, future::Future};
+use crossterm::event::{Event, EventStream};
+use futures::StreamExt;
 use ratatui::backend::Backend;
 use ratatui::Terminal;
 use tokio::sync::mpsc;
 
 use crate::app::App;
-use crate::config::UI_POLL_INTERVAL_MS;
 use crate::inputs::handle_key_event;
 use crate::parser::parse_log;
 use crate::ui::ui;
@@ -43,9 +43,11 @@ async fn shutdown_signal() {
 ///
 /// This function handles three types of events:
 /// - Incoming log messages from the channel
-/// - User keyboard input
+/// - User keyboard input (async via crossterm EventStream)
 /// - OS shutdown signals (SIGINT/SIGTERM)
 ///
+/// When the log producer channel closes (e.g., stdin EOF), the app continues
+/// running so the user can still scroll, filter, and review buffered logs.
 /// The loop terminates when `app.should_quit` is set to `true`.
 ///
 /// # Arguments
@@ -66,29 +68,49 @@ pub async fn run<B: Backend>(
         Box::new(shutdown_signal()) as Box<dyn Future<Output = ()> + Send>
     );
 
+    let mut event_stream = EventStream::new();
+    let mut channel_open = true;
+
     loop {
         terminal.draw(|f| ui(f, app))?;
 
+        // Update visible height for page scroll calculations
+        if let Ok(size) = crossterm::terminal::size() {
+            app.visible_height = size.1.saturating_sub(5);
+        }
+
         tokio::select! {
-            // Handle incoming logs
-            maybe_line = rx.recv() => {
+            // Handle incoming logs (only if channel is still open)
+            maybe_line = rx.recv(), if channel_open => {
                 match maybe_line {
                     Some(line) => {
                         let entry = parse_log(line);
                         app.on_log(entry);
                     }
                     None => {
-                        // Producer ended; exit gracefully
-                        app.should_quit = true;
+                        // Producer ended; stop listening but don't quit.
+                        // User can still scroll/filter existing logs and quit with 'q'.
+                        channel_open = false;
                     }
                 }
             }
 
-            // Handle user input
-            // Poll at UI_POLL_INTERVAL_MS to keep UI responsive but not CPU heavy
-            _ = async {}, if event::poll(Duration::from_millis(UI_POLL_INTERVAL_MS))? => {
-                if let Event::Key(key) = event::read()? {
-                    handle_key_event(app, key);
+            // Handle user input (async via EventStream)
+            maybe_event = event_stream.next() => {
+                match maybe_event {
+                    Some(Ok(Event::Key(key))) => {
+                        handle_key_event(app, key);
+                    }
+                    Some(Ok(_)) => {
+                        // Mouse events, resize events, etc. -- ignore for now
+                    }
+                    Some(Err(_)) => {
+                        // Event read error -- ignore and continue
+                    }
+                    None => {
+                        // EventStream ended (shouldn't happen normally)
+                        app.should_quit = true;
+                    }
                 }
             }
 
@@ -103,4 +125,3 @@ pub async fn run<B: Backend>(
         }
     }
 }
-
