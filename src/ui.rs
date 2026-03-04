@@ -34,7 +34,8 @@ fn compute_visual_lines(text: &str, width: usize) -> usize {
 /// Finds the index of the first entry to display for auto-scroll.
 ///
 /// Iterates entries in reverse, summing visual lines until the viewport is full.
-/// Returns the index of the first entry that should be visible.
+/// Returns the index of the first entry that should be visible. Always ensures
+/// at least the last entry is shown, even if it exceeds the viewport height.
 fn compute_auto_scroll_entry(
     entries: &[&LogEntry],
     viewport_height: usize,
@@ -44,12 +45,14 @@ fn compute_auto_scroll_entry(
         return 0;
     }
 
+    let last_index = entries.len() - 1;
     let mut lines_used = 0usize;
     for (i, entry) in entries.iter().enumerate().rev() {
         let entry_lines = compute_visual_lines(&entry.pretty, viewport_width);
         lines_used += entry_lines;
         if lines_used > viewport_height {
-            return i + 1;
+            // Clamp so at least the last entry is always visible
+            return (i + 1).min(last_index);
         }
     }
     0
@@ -246,5 +249,25 @@ mod tests {
         let e1 = entry("line1");
         let entries: Vec<&LogEntry> = vec![&e1];
         assert_eq!(compute_auto_scroll_entry(&entries, 0, 80), 0);
+    }
+
+    #[test]
+    fn test_auto_scroll_single_oversized_entry() {
+        // Single entry with 20 visual lines, viewport only 3 lines
+        // Must still show the last (only) entry, not return entries.len()
+        let big = entry("a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no\np\nq\nr\ns\nt");
+        let entries: Vec<&LogEntry> = vec![&big];
+        assert_eq!(compute_auto_scroll_entry(&entries, 3, 80), 0);
+    }
+
+    #[test]
+    fn test_auto_scroll_last_entry_exceeds_viewport() {
+        // 3 entries, last one alone exceeds viewport
+        let e1 = entry("short");
+        let e2 = entry("short");
+        let big = entry("a\nb\nc\nd\ne\nf\ng\nh\ni\nj");
+        let entries: Vec<&LogEntry> = vec![&e1, &e2, &big];
+        // Last entry is 10 lines, viewport is 3 — should show last entry (index 2)
+        assert_eq!(compute_auto_scroll_entry(&entries, 3, 80), 2);
     }
 }

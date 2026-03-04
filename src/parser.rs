@@ -289,7 +289,7 @@ mod tests {
             level: LogLevel::Unknown,
         };
         let line = style_log(&entry, "HELLO");
-        assert!(line.spans.len() >= 1);
+        assert!(!line.spans.is_empty());
         assert_eq!(line.spans[0].style.bg, Some(Color::Cyan));
     }
 
