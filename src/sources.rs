@@ -44,7 +44,13 @@ fn spawn_tail_file(path: PathBuf, tx: mpsc::Sender<String>) -> JoinHandle<()> {
             Ok(meta) => offset = meta.len(),
             Err(e) => {
                 // Send error message but continue trying
-                let _ = tx.send(format!("⚠️  Waiting for file to exist: {} ({})", path.display(), e)).await;
+                let _ = tx
+                    .send(format!(
+                        "⚠️  Waiting for file to exist: {} ({})",
+                        path.display(),
+                        e
+                    ))
+                    .await;
 
                 // If file doesn't exist yet, wait until it appears
                 loop {
@@ -70,7 +76,9 @@ fn spawn_tail_file(path: PathBuf, tx: mpsc::Sender<String>) -> JoinHandle<()> {
                     let len = meta.len();
                     if len < offset {
                         // Truncated or rotated
-                        let _ = tx.send(format!("⚠️  File truncated or rotated: {}", path.display())).await;
+                        let _ = tx
+                            .send(format!("⚠️  File truncated or rotated: {}", path.display()))
+                            .await;
                         offset = 0;
                     }
 
@@ -96,7 +104,9 @@ fn spawn_tail_file(path: PathBuf, tx: mpsc::Sender<String>) -> JoinHandle<()> {
                                                 }
                                             }
                                             Err(e) => {
-                                                let _ = tx.send(format!("⚠️  Error reading line: {}", e)).await;
+                                                let _ = tx
+                                                    .send(format!("⚠️  Error reading line: {}", e))
+                                                    .await;
                                                 break;
                                             }
                                         }
@@ -113,7 +123,9 @@ fn spawn_tail_file(path: PathBuf, tx: mpsc::Sender<String>) -> JoinHandle<()> {
                 }
                 Err(e) => {
                     // File temporarily unavailable; reset offset and keep trying
-                    let _ = tx.send(format!("⚠️  File unavailable: {} ({})", path.display(), e)).await;
+                    let _ = tx
+                        .send(format!("⚠️  File unavailable: {} ({})", path.display(), e))
+                        .await;
                     offset = 0;
                 }
             }
@@ -149,7 +161,9 @@ fn spawn_stdin_reader(tx: mpsc::Sender<String>) -> JoinHandle<()> {
                     }
                 }
                 Err(e) => {
-                    let _ = tx.send(format!("⚠️  Error reading from stdin: {}", e)).await;
+                    let _ = tx
+                        .send(format!("⚠️  Error reading from stdin: {}", e))
+                        .await;
                     return;
                 }
             }

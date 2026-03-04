@@ -11,5 +11,3 @@ pub mod parser;
 pub mod sources;
 pub mod terminal;
 pub mod ui;
-
-

@@ -25,4 +25,3 @@ pub const FILE_POLL_INTERVAL_MS: u64 = 500;
 /// This determines how frequently we check for user input.
 /// Affects UI responsiveness vs CPU usage trade-off.
 pub const UI_POLL_INTERVAL_MS: u64 = 100;
-
