@@ -3,7 +3,7 @@
 //! This module provides functionality to parse JSON and plain text log entries,
 //! detect log levels, and style them for terminal display with syntax highlighting.
 
-use ratatui::style::{Color, Style, Modifier};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use serde_json::Value;
 
@@ -38,7 +38,8 @@ pub fn parse_log(line: String) -> LogEntry {
     match serde_json::from_str::<Value>(&line) {
         Ok(json) => {
             // Try to guess the level from common JSON fields
-            let level_str = json.get("level")
+            let level_str = json
+                .get("level")
                 .or_else(|| json.get("severity"))
                 .or_else(|| json.get("lvl"))
                 .and_then(|v| v.as_str());

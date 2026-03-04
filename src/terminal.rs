@@ -5,9 +5,9 @@
 
 use anyhow::Result;
 use crossterm::{
+    event::{DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-    event::{DisableMouseCapture, EnableMouseCapture},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
@@ -19,7 +19,12 @@ impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
         let mut w = io::stdout();
-        let _ = execute!(w, crossterm::cursor::Show, LeaveAlternateScreen, DisableMouseCapture);
+        let _ = execute!(
+            w,
+            crossterm::cursor::Show,
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        );
     }
 }
 
@@ -32,7 +37,7 @@ pub fn init() -> Result<(Terminal<CrosstermBackend<io::Stdout>>, TerminalGuard)>
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let terminal = Terminal::new(backend)?;
-    
+
     Ok((terminal, TerminalGuard))
 }
 
@@ -47,4 +52,3 @@ pub fn restore(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<
     terminal.show_cursor()?;
     Ok(())
 }
-

@@ -1,7 +1,7 @@
 //! Keyboard input handling for the application.
 
-use crossterm::event::{KeyCode, KeyEvent};
 use crate::app::{App, InputMode};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 
 /// Handles keyboard input events and updates the application state.
 ///
@@ -19,6 +19,10 @@ use crate::app::{App, InputMode};
 /// **Editing mode**: `Enter` applies filter, `Esc` cancels and clears filter,
 /// characters are added to input buffer
 pub fn handle_key_event(app: &mut App, key: KeyEvent) {
+    if key.kind != KeyEventKind::Press {
+        return;
+    }
+
     match app.input_mode {
         InputMode::Normal => match key.code {
             KeyCode::Char('q') => app.should_quit = true,
@@ -56,8 +60,8 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, KeyEventKind, KeyEventState};
     use crate::parser::{LogEntry, LogLevel};
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent {
@@ -246,5 +250,33 @@ mod tests {
         app.input_mode = InputMode::Editing;
         handle_key_event(&mut app, key(KeyCode::Backspace));
         assert!(app.input_buffer.is_empty());
+    }
+
+    // --- KeyEventKind guard tests ---
+
+    #[test]
+    fn test_release_event_ignored() {
+        let mut app = App::new();
+        let release = KeyEvent {
+            code: KeyCode::Char('q'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Release,
+            state: KeyEventState::NONE,
+        };
+        handle_key_event(&mut app, release);
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn test_repeat_event_ignored() {
+        let mut app = App::new();
+        let repeat = KeyEvent {
+            code: KeyCode::Char('q'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Repeat,
+            state: KeyEventState::NONE,
+        };
+        handle_key_event(&mut app, repeat);
+        assert!(!app.should_quit);
     }
 }

@@ -26,3 +26,6 @@ target
 /target
 
 .idea/
+
+.claude/
+CLAUDE.md

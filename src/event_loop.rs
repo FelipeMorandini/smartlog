@@ -5,11 +5,11 @@
 //! - User keyboard input
 //! - OS shutdown signals
 
-use std::{io, future::Future};
 use crossterm::event::{Event, EventStream};
 use futures::StreamExt;
 use ratatui::backend::Backend;
 use ratatui::Terminal;
+use std::{future::Future, io};
 use tokio::sync::mpsc;
 
 use crate::app::App;
@@ -25,11 +25,17 @@ async fn shutdown_signal() {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{signal, SignalKind};
-        let mut sigterm = signal(SignalKind::terminate())
-            .expect("failed to install SIGTERM handler");
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {},
-            _ = sigterm.recv() => {},
+        match signal(SignalKind::terminate()) {
+            Ok(mut sigterm) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {},
+                    _ = sigterm.recv() => {},
+                }
+            }
+            Err(_) => {
+                // SIGTERM not available (sandboxed/containerized env); Ctrl+C only
+                let _ = tokio::signal::ctrl_c().await;
+            }
         }
     }
 
@@ -64,9 +70,8 @@ pub async fn run<B: Backend>(
     app: &mut App,
     rx: &mut mpsc::Receiver<String>,
 ) -> io::Result<()> {
-    let mut shutdown_fut = std::pin::Pin::from(
-        Box::new(shutdown_signal()) as Box<dyn Future<Output = ()> + Send>
-    );
+    let mut shutdown_fut =
+        std::pin::Pin::from(Box::new(shutdown_signal()) as Box<dyn Future<Output = ()> + Send>);
 
     let mut event_stream = EventStream::new();
     let mut channel_open = true;
