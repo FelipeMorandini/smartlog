@@ -76,17 +76,11 @@ impl App {
     }
 
     /// Scrolls the view down by one line.
-    ///
-    /// Re-enables auto-scroll if the user reaches the bottom.
     pub fn scroll_down(&mut self) {
         let max_scroll = self.get_filtered_count().saturating_sub(1);
 
         if self.scroll < max_scroll {
             self.scroll += 1;
-        }
-
-        if self.scroll >= max_scroll {
-            self.auto_scroll = true;
         }
     }
 
@@ -100,9 +94,6 @@ impl App {
     pub fn scroll_down_by(&mut self, n: usize) {
         let max_scroll = self.get_filtered_count().saturating_sub(1);
         self.scroll = (self.scroll + n).min(max_scroll);
-        if self.scroll >= max_scroll {
-            self.auto_scroll = true;
-        }
     }
 
     /// Jumps to the top of the log buffer.
@@ -127,6 +118,16 @@ impl App {
                 .iter()
                 .filter(|l| l.pretty.to_lowercase().contains(&q))
                 .collect()
+        }
+    }
+
+    /// Clamps `scroll` so it does not exceed the last filtered entry index.
+    pub fn clamp_scroll(&mut self) {
+        let count = self.get_filtered_count();
+        if count == 0 {
+            self.scroll = 0;
+        } else {
+            self.scroll = self.scroll.min(count - 1);
         }
     }
 
@@ -219,14 +220,15 @@ mod tests {
     }
 
     #[test]
-    fn test_scroll_down_re_enables_auto_scroll_at_bottom() {
+    fn test_scroll_down_does_not_re_enable_auto_scroll() {
         let mut app = App::new();
         app.on_log(make_entry("a", LogLevel::Info));
         app.on_log(make_entry("b", LogLevel::Info));
         app.auto_scroll = false;
         app.scroll = 0;
         app.scroll_down();
-        assert!(app.auto_scroll);
+        assert!(!app.auto_scroll);
+        assert_eq!(app.scroll, 1);
     }
 
     #[test]
@@ -285,7 +287,61 @@ mod tests {
         app.scroll = 0;
         app.scroll_down_by(100);
         assert_eq!(app.scroll, 4);
-        assert!(app.auto_scroll);
+        assert!(!app.auto_scroll);
+    }
+
+    #[test]
+    fn test_clamp_scroll_reduces_beyond_filtered() {
+        let mut app = App::new();
+        app.on_log(make_entry("alpha", LogLevel::Info));
+        app.on_log(make_entry("beta", LogLevel::Info));
+        app.on_log(make_entry("gamma", LogLevel::Info));
+        app.scroll = 2;
+        app.input_buffer = "alpha".to_string();
+        // Only 1 match, so scroll should clamp to 0
+        app.clamp_scroll();
+        assert_eq!(app.scroll, 0);
+    }
+
+    #[test]
+    fn test_clamp_scroll_no_matches() {
+        let mut app = App::new();
+        app.on_log(make_entry("hello", LogLevel::Info));
+        app.scroll = 5;
+        app.input_buffer = "zzz".to_string();
+        app.clamp_scroll();
+        assert_eq!(app.scroll, 0);
+    }
+
+    #[test]
+    fn test_clamp_scroll_within_range_unchanged() {
+        let mut app = App::new();
+        for _ in 0..10 {
+            app.on_log(make_entry("line", LogLevel::Info));
+        }
+        app.scroll = 5;
+        app.clamp_scroll();
+        assert_eq!(app.scroll, 5);
+    }
+
+    #[test]
+    fn test_scroll_down_empty_filter_no_auto_scroll() {
+        let mut app = App::new();
+        app.input_buffer = "nonexistent".to_string();
+        app.auto_scroll = false;
+        app.scroll = 0;
+        app.scroll_down();
+        assert!(!app.auto_scroll);
+    }
+
+    #[test]
+    fn test_scroll_down_by_empty_filter_no_auto_scroll() {
+        let mut app = App::new();
+        app.input_buffer = "nonexistent".to_string();
+        app.auto_scroll = false;
+        app.scroll = 0;
+        app.scroll_down_by(10);
+        assert!(!app.auto_scroll);
     }
 
     #[test]

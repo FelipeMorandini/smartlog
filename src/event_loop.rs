@@ -75,6 +75,8 @@ pub async fn run<B: Backend>(
 
     let mut event_stream = EventStream::new();
     let mut channel_open = true;
+    let mut consecutive_event_errors: u32 = 0;
+    const MAX_CONSECUTIVE_EVENT_ERRORS: u32 = 50;
 
     loop {
         terminal.draw(|f| ui(f, app))?;
@@ -104,13 +106,18 @@ pub async fn run<B: Backend>(
             maybe_event = event_stream.next() => {
                 match maybe_event {
                     Some(Ok(Event::Key(key))) => {
+                        consecutive_event_errors = 0;
                         handle_key_event(app, key);
                     }
                     Some(Ok(_)) => {
                         // Mouse events, resize events, etc. -- ignore for now
+                        consecutive_event_errors = 0;
                     }
                     Some(Err(_)) => {
-                        // Event read error -- ignore and continue
+                        consecutive_event_errors += 1;
+                        if consecutive_event_errors >= MAX_CONSECUTIVE_EVENT_ERRORS {
+                            app.should_quit = true;
+                        }
                     }
                     None => {
                         // EventStream ended (shouldn't happen normally)

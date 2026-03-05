@@ -17,7 +17,6 @@ pub struct TerminalGuard;
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        let _ = disable_raw_mode();
         let mut w = io::stdout();
         let _ = execute!(
             w,
@@ -25,6 +24,7 @@ impl Drop for TerminalGuard {
             LeaveAlternateScreen,
             DisableMouseCapture
         );
+        let _ = disable_raw_mode();
     }
 }
 
@@ -43,12 +43,12 @@ pub fn init() -> Result<(Terminal<CrosstermBackend<io::Stdout>>, TerminalGuard)>
 
 /// Restores the terminal to normal mode.
 pub fn restore(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
-    disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
         LeaveAlternateScreen,
         DisableMouseCapture
     )?;
     terminal.show_cursor()?;
+    disable_raw_mode()?;
     Ok(())
 }

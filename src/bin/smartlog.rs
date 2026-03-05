@@ -48,10 +48,8 @@ async fn main() -> Result<()> {
     // TerminalGuard will handle restoration on drop, but we also explicitly restore
     terminal::restore(&mut terminal)?;
 
-    // 8. Report errors if any
-    if let Err(err) = res {
-        eprintln!("Error: {:?}", err);
-    }
+    // 8. Propagate errors (terminal is already restored above)
+    res?;
 
     Ok(())
 }
