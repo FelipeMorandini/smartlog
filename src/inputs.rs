@@ -37,19 +37,28 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
             KeyCode::End | KeyCode::Char('G') => app.scroll_to_bottom(),
             KeyCode::Esc => {
                 app.input_buffer.clear();
+                app.clamp_scroll();
                 app.auto_scroll = true;
             }
             _ => {}
         },
         InputMode::Editing => match key.code {
-            KeyCode::Enter => app.input_mode = InputMode::Normal,
-            KeyCode::Char(c) => app.input_buffer.push(c),
+            KeyCode::Enter => {
+                app.input_mode = InputMode::Normal;
+                app.clamp_scroll();
+            }
+            KeyCode::Char(c) => {
+                app.input_buffer.push(c);
+                app.clamp_scroll();
+            }
             KeyCode::Backspace => {
                 app.input_buffer.pop();
+                app.clamp_scroll();
             }
             KeyCode::Esc => {
                 app.input_mode = InputMode::Normal;
                 app.input_buffer.clear();
+                app.clamp_scroll();
                 app.auto_scroll = true;
             }
             _ => {}
@@ -200,6 +209,42 @@ mod tests {
         app.visible_height = 20;
         handle_key_event(&mut app, key(KeyCode::PageDown));
         assert_eq!(app.scroll, 30);
+    }
+
+    // --- Scroll clamping on filter change tests ---
+
+    #[test]
+    fn test_editing_char_clamps_scroll() {
+        let mut app = app_with_logs(10);
+        app.input_mode = InputMode::Editing;
+        app.scroll = 9;
+        // Typing a filter that matches fewer entries should clamp scroll
+        app.input_buffer = "log ".to_string();
+        handle_key_event(&mut app, key(KeyCode::Char('0')));
+        // "log 0" matches only 1 entry, scroll should be clamped to 0
+        assert_eq!(app.scroll, 0);
+    }
+
+    #[test]
+    fn test_editing_backspace_clamps_scroll() {
+        let mut app = app_with_logs(10);
+        app.input_mode = InputMode::Editing;
+        app.input_buffer = "log 0".to_string();
+        app.scroll = 0;
+        // Backspace broadens filter to "log " which matches all 10
+        handle_key_event(&mut app, key(KeyCode::Backspace));
+        assert_eq!(app.input_buffer, "log ");
+    }
+
+    #[test]
+    fn test_enter_clamps_scroll() {
+        let mut app = app_with_logs(10);
+        app.input_mode = InputMode::Editing;
+        app.input_buffer = "log 0".to_string();
+        app.scroll = 5; // Beyond the 1 match
+        handle_key_event(&mut app, key(KeyCode::Enter));
+        assert_eq!(app.scroll, 0);
+        assert_eq!(app.input_mode, InputMode::Normal);
     }
 
     // --- Editing mode tests ---

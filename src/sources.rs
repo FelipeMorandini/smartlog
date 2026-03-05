@@ -34,105 +34,109 @@ pub fn spawn_source(file: Option<String>, tx: mpsc::Sender<String>) -> JoinHandl
 /// Tail a file like `tail -F` (basic):
 /// - Start from end of file
 /// - Periodically check for growth and read new lines
-/// - If truncated/rotated, start from beginning
+/// - If truncated/rotated, reopen from beginning
+/// - Keeps file handle open across poll cycles for efficiency
 fn spawn_tail_file(path: PathBuf, tx: mpsc::Sender<String>) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let mut offset: u64;
-
-        // Initialize offset to current file length if it exists
-        match fs::metadata(&path).await {
-            Ok(meta) => offset = meta.len(),
-            Err(e) => {
-                // Send error message but continue trying
-                let _ = tx
-                    .send(format!(
-                        "⚠️  Waiting for file to exist: {} ({})",
-                        path.display(),
-                        e
-                    ))
-                    .await;
-
-                // If file doesn't exist yet, wait until it appears
-                loop {
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                    match fs::metadata(&path).await {
-                        Ok(meta) => {
-                            offset = meta.len();
-                            let _ = tx.send(format!("✓ File found: {}", path.display())).await;
-                            break;
-                        }
-                        Err(_) => continue,
-                    }
-                }
-            }
-        }
-
+        let mut offset: u64 = wait_for_file(&path, &tx).await;
+        let mut reader: Option<BufReader<fs::File>> = None;
         let mut buf = String::new();
 
         loop {
-            // Periodically check for new content or truncation
             match fs::metadata(&path).await {
                 Ok(meta) => {
                     let len = meta.len();
                     if len < offset {
-                        // Truncated or rotated
                         let _ = tx
                             .send(format!("⚠️  File truncated or rotated: {}", path.display()))
                             .await;
                         offset = 0;
+                        reader = None; // Force reopen
                     }
 
                     if len > offset {
-                        // Read new data from offset to EOF
-                        match fs::File::open(&path).await {
-                            Ok(file) => {
-                                let mut reader = BufReader::new(file);
-                                if reader.seek(SeekFrom::Start(offset)).await.is_ok() {
-                                    loop {
-                                        buf.clear();
-                                        match reader.read_line(&mut buf).await {
-                                            Ok(0) => break, // EOF reached
-                                            Ok(_) => {
-                                                // Strip trailing newline to normalize
-                                                if buf.ends_with('\n') {
-                                                    while buf.ends_with(['\n', '\r']) {
-                                                        buf.pop();
-                                                    }
-                                                }
-                                                if tx.send(buf.clone()).await.is_err() {
-                                                    return; // Receiver dropped
-                                                }
-                                            }
-                                            Err(e) => {
-                                                let _ = tx
-                                                    .send(format!("⚠️  Error reading line: {}", e))
-                                                    .await;
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    // Update offset to actual reader position after reading
-                                    offset = reader.stream_position().await.unwrap_or(len);
-                                }
+                        if reader.is_none() {
+                            reader = open_and_seek(&path, offset).await;
+                        }
+                        if let Some(ref mut r) = reader {
+                            if read_new_lines(r, &tx, &mut buf).await.is_err() {
+                                return; // Receiver dropped
                             }
-                            Err(e) => {
-                                let _ = tx.send(format!("⚠️  Error opening file: {}", e)).await;
-                            }
+                            offset = r.stream_position().await.unwrap_or(len);
                         }
                     }
                 }
                 Err(e) => {
-                    // File temporarily unavailable; reset offset and keep trying
                     let _ = tx
                         .send(format!("⚠️  File unavailable: {} ({})", path.display(), e))
                         .await;
                     offset = 0;
+                    reader = None; // Close handle, file may have been deleted
                 }
             }
 
             tokio::time::sleep(Duration::from_millis(FILE_POLL_INTERVAL_MS)).await;
         }
     })
+}
+
+/// Waits for a file to appear and returns its initial length.
+async fn wait_for_file(path: &PathBuf, tx: &mpsc::Sender<String>) -> u64 {
+    match fs::metadata(path).await {
+        Ok(meta) => meta.len(),
+        Err(e) => {
+            let _ = tx
+                .send(format!(
+                    "⚠️  Waiting for file to exist: {} ({})",
+                    path.display(),
+                    e
+                ))
+                .await;
+            loop {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                if let Ok(meta) = fs::metadata(path).await {
+                    let _ = tx.send(format!("✓ File found: {}", path.display())).await;
+                    return meta.len();
+                }
+            }
+        }
+    }
+}
+
+/// Opens a file and seeks to the given offset, returning a buffered reader.
+async fn open_and_seek(path: &PathBuf, offset: u64) -> Option<BufReader<fs::File>> {
+    let file = fs::File::open(path).await.ok()?;
+    let mut reader = BufReader::new(file);
+    reader.seek(SeekFrom::Start(offset)).await.ok()?;
+    Some(reader)
+}
+
+/// Reads all new lines from the reader and sends them to the channel.
+///
+/// Returns `Ok(())` on success or EOF, `Err(())` if the channel receiver was dropped.
+async fn read_new_lines(
+    reader: &mut BufReader<fs::File>,
+    tx: &mpsc::Sender<String>,
+    buf: &mut String,
+) -> Result<(), ()> {
+    loop {
+        buf.clear();
+        match reader.read_line(buf).await {
+            Ok(0) => return Ok(()), // EOF reached
+            Ok(_) => {
+                while buf.ends_with(['\n', '\r']) {
+                    buf.pop();
+                }
+                if tx.send(buf.clone()).await.is_err() {
+                    return Err(()); // Receiver dropped
+                }
+            }
+            Err(e) => {
+                let _ = tx.send(format!("⚠️  Error reading line: {}", e)).await;
+                return Ok(());
+            }
+        }
+    }
 }
 
 /// Spawn a task that reads newline-delimited logs from stdin (piped input).
