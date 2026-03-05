@@ -195,4 +195,4 @@ Found a bug or have a feature request? Please [open an issue](https://github.com
 
 <div align="center">
 Made with ❤️ and Rust 🦀
-</div> 
+</div>
