@@ -15,6 +15,10 @@ Built with Rust • Async I/O with Tokio • Beautiful TUI with Ratatui.
 - Auto-detects JSON vs. plain text
 - Pretty-prints JSON with level coloring
 - Live filtering with instant highlight (`/` to search)
+- Regex filtering mode (`r` to toggle)
+- Log level filtering — cycle through ERROR, WARN, INFO, DEBUG (`l` key)
+- Line wrapping toggle (`w` key)
+- Mouse wheel scrolling
 - Smooth scrolling with follow mode
 - Tails files like `tail -f` (handles truncation/rotation)
 - Reads from stdin for easy piping: `tail -f app.log | smartlog`
@@ -108,6 +112,10 @@ tail -f /var/log/app.log | smartlog
 | `Home` or `g` | Jump to top |
 | `End` or `G` | Jump to bottom (re-enables auto-scroll) |
 | `Enter` | Apply filter (in filter mode) |
+| `w` | Toggle line wrapping on/off |
+| `l` | Cycle log level filter (ALL → ERROR → WARN → INFO → DEBUG → ALL) |
+| `r` | Toggle regex filtering mode |
+| Mouse wheel | Scroll up/down |
 | `q` | Quit application |
 
 ## 🔎 Filter Mode
@@ -118,6 +126,14 @@ tail -f /var/log/app.log | smartlog
 4. Press `ESC` to clear the filter and return to normal mode
 
 Matching text is highlighted with a cyan background for easy visibility.
+
+### Regex Filtering
+
+Press `r` to toggle regex mode. When active, the filter input is treated as a regular expression (case-insensitive). Invalid regex patterns are indicated in the status bar.
+
+### Log Level Filtering
+
+Press `l` to cycle through minimum log level filters: ALL → ERROR → WARN → INFO → DEBUG → ALL. Only entries at or above the selected severity are shown. This filter combines with the text/regex filter (both must match).
 
 ## 📊 Log Format Support
 

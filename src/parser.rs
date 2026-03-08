@@ -8,13 +8,48 @@ use ratatui::text::{Line, Span};
 use serde_json::Value;
 
 /// Log severity level.
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub enum LogLevel {
     Error,
     Warn,
     Info,
     Debug,
     Unknown,
+}
+
+impl LogLevel {
+    /// Returns a numeric severity for ordering (lower = more severe).
+    pub fn severity(self) -> u8 {
+        match self {
+            Self::Error => 0,
+            Self::Warn => 1,
+            Self::Info => 2,
+            Self::Debug => 3,
+            Self::Unknown => 4,
+        }
+    }
+
+    /// Cycles to the next level filter: Error → Warn → Info → Debug → None (wraps).
+    pub fn next_filter(self) -> Option<Self> {
+        match self {
+            Self::Error => Some(Self::Warn),
+            Self::Warn => Some(Self::Info),
+            Self::Info => Some(Self::Debug),
+            Self::Debug => None,
+            Self::Unknown => None,
+        }
+    }
+
+    /// Returns a human-readable label for the level.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Error => "ERROR",
+            Self::Warn => "WARN",
+            Self::Info => "INFO",
+            Self::Debug => "DEBUG",
+            Self::Unknown => "UNKNOWN",
+        }
+    }
 }
 
 /// A parsed log entry with its original text, pretty-printed version, and severity level.
@@ -348,6 +383,34 @@ mod tests {
         };
         let line = style_log(&entry, "");
         assert_eq!(line.spans[0].style.fg, Some(Color::Yellow));
+    }
+
+    // --- LogLevel method tests ---
+
+    #[test]
+    fn test_severity_ordering() {
+        assert!(LogLevel::Error.severity() < LogLevel::Warn.severity());
+        assert!(LogLevel::Warn.severity() < LogLevel::Info.severity());
+        assert!(LogLevel::Info.severity() < LogLevel::Debug.severity());
+        assert!(LogLevel::Debug.severity() < LogLevel::Unknown.severity());
+    }
+
+    #[test]
+    fn test_next_filter_cycle() {
+        assert_eq!(LogLevel::Error.next_filter(), Some(LogLevel::Warn));
+        assert_eq!(LogLevel::Warn.next_filter(), Some(LogLevel::Info));
+        assert_eq!(LogLevel::Info.next_filter(), Some(LogLevel::Debug));
+        assert_eq!(LogLevel::Debug.next_filter(), None);
+        assert_eq!(LogLevel::Unknown.next_filter(), None);
+    }
+
+    #[test]
+    fn test_level_labels() {
+        assert_eq!(LogLevel::Error.label(), "ERROR");
+        assert_eq!(LogLevel::Warn.label(), "WARN");
+        assert_eq!(LogLevel::Info.label(), "INFO");
+        assert_eq!(LogLevel::Debug.label(), "DEBUG");
+        assert_eq!(LogLevel::Unknown.label(), "UNKNOWN");
     }
 
     #[test]

@@ -14,7 +14,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 ///
 /// **Normal mode**: `q` quits, `/` enters editing, `k`/`j` or arrows scroll,
 /// `PageUp`/`PageDown` scroll by page, `Home`/`g` jump to top, `End`/`G` jump to bottom,
-/// `Esc` clears search
+/// `Esc` clears search, `w` toggles line wrap, `l` cycles log level filter,
+/// `r` toggles regex mode
 ///
 /// **Editing mode**: `Enter` applies filter, `Esc` cancels and clears filter,
 /// characters are added to input buffer
@@ -35,6 +36,15 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
             KeyCode::PageDown => app.scroll_down_by(app.visible_height as usize),
             KeyCode::Home | KeyCode::Char('g') => app.scroll_to_top(),
             KeyCode::End | KeyCode::Char('G') => app.scroll_to_bottom(),
+            KeyCode::Char('w') => app.line_wrap = !app.line_wrap,
+            KeyCode::Char('l') => {
+                app.cycle_log_level();
+                app.clamp_scroll();
+            }
+            KeyCode::Char('r') => {
+                app.use_regex = !app.use_regex;
+                app.clamp_scroll();
+            }
             KeyCode::Esc => {
                 app.input_buffer.clear();
                 app.clamp_scroll();
@@ -323,5 +333,71 @@ mod tests {
         };
         handle_key_event(&mut app, repeat);
         assert!(!app.should_quit);
+    }
+
+    // --- New feature key binding tests ---
+
+    #[test]
+    fn test_w_toggles_line_wrap() {
+        let mut app = App::new();
+        assert!(app.line_wrap);
+        handle_key_event(&mut app, key(KeyCode::Char('w')));
+        assert!(!app.line_wrap);
+        handle_key_event(&mut app, key(KeyCode::Char('w')));
+        assert!(app.line_wrap);
+    }
+
+    #[test]
+    fn test_l_cycles_log_level() {
+        let mut app = app_with_logs(5);
+        assert!(app.min_log_level.is_none());
+        handle_key_event(&mut app, key(KeyCode::Char('l')));
+        assert_eq!(app.min_log_level, Some(LogLevel::Error));
+        handle_key_event(&mut app, key(KeyCode::Char('l')));
+        assert_eq!(app.min_log_level, Some(LogLevel::Warn));
+    }
+
+    #[test]
+    fn test_l_clamps_scroll() {
+        let mut app = App::new();
+        app.on_log(LogEntry {
+            raw: "err".to_string(),
+            pretty: "err".to_string(),
+            level: LogLevel::Error,
+        });
+        app.on_log(LogEntry {
+            raw: "info".to_string(),
+            pretty: "info".to_string(),
+            level: LogLevel::Info,
+        });
+        app.scroll = 1;
+        // Cycle to Error-only -> 1 match -> scroll clamps to 0
+        handle_key_event(&mut app, key(KeyCode::Char('l')));
+        assert_eq!(app.scroll, 0);
+    }
+
+    #[test]
+    fn test_r_toggles_regex() {
+        let mut app = App::new();
+        assert!(!app.use_regex);
+        handle_key_event(&mut app, key(KeyCode::Char('r')));
+        assert!(app.use_regex);
+        handle_key_event(&mut app, key(KeyCode::Char('r')));
+        assert!(!app.use_regex);
+    }
+
+    #[test]
+    fn test_r_clamps_scroll() {
+        let mut app = App::new();
+        app.on_log(LogEntry {
+            raw: "hello 123".to_string(),
+            pretty: "hello 123".to_string(),
+            level: LogLevel::Info,
+        });
+        app.input_buffer = "[invalid".to_string();
+        app.scroll = 0;
+        // Toggle regex on -> invalid regex -> 0 matches -> scroll clamps
+        handle_key_event(&mut app, key(KeyCode::Char('r')));
+        assert_eq!(app.scroll, 0);
     }
 }

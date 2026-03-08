@@ -5,7 +5,7 @@
 //! - User keyboard input
 //! - OS shutdown signals
 
-use crossterm::event::{Event, EventStream};
+use crossterm::event::{Event, EventStream, MouseEventKind};
 use futures_util::StreamExt;
 use ratatui::backend::Backend;
 use ratatui::Terminal;
@@ -109,8 +109,15 @@ pub async fn run<B: Backend>(
                         consecutive_event_errors = 0;
                         handle_key_event(app, key);
                     }
+                    Some(Ok(Event::Mouse(mouse))) => {
+                        consecutive_event_errors = 0;
+                        match mouse.kind {
+                            MouseEventKind::ScrollUp => app.scroll_up(),
+                            MouseEventKind::ScrollDown => app.scroll_down(),
+                            _ => {}
+                        }
+                    }
                     Some(Ok(_)) => {
-                        // Mouse events, resize events, etc. -- ignore for now
                         consecutive_event_errors = 0;
                     }
                     Some(Err(_)) => {
