@@ -14,10 +14,13 @@ pub const MAX_LOG_BUFFER_SIZE: usize = 2000;
 /// producer (file/stdin reader) and consumer (UI) before backpressure occurs.
 pub const CHANNEL_BUFFER_SIZE: usize = 100;
 
-/// Maximum size of a single log line in bytes.
+/// Maximum retained size of a single log line in bytes.
 ///
-/// Lines exceeding this limit are truncated to prevent excessive memory usage
-/// from unusually large log entries (e.g., multi-MB JSON blobs).
+/// Lines exceeding this limit are truncated *after* being read to prevent
+/// long-term buffer bloat from unusually large log entries (e.g., multi-MB
+/// JSON blobs). This caps the stored line length and steady-state memory
+/// usage, but does not limit the peak allocation performed by the underlying
+/// `read_line` call.
 pub const MAX_LOG_LINE_SIZE: usize = 65_536; // 64 KB
 
 /// Polling interval for file changes in milliseconds.

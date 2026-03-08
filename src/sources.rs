@@ -154,7 +154,17 @@ const TRUNCATION_SUFFIX: &str = " ... [truncated]";
 /// boundaries so we never produce invalid strings.
 fn truncate_line(line: &mut String) {
     if line.len() > MAX_LOG_LINE_SIZE {
-        let mut end = MAX_LOG_LINE_SIZE.saturating_sub(TRUNCATION_SUFFIX.len());
+        if TRUNCATION_SUFFIX.len() >= MAX_LOG_LINE_SIZE {
+            // Suffix alone would exceed the limit — just hard-truncate.
+            let mut end = MAX_LOG_LINE_SIZE;
+            while end > 0 && !line.is_char_boundary(end) {
+                end -= 1;
+            }
+            line.truncate(end);
+            return;
+        }
+
+        let mut end = MAX_LOG_LINE_SIZE - TRUNCATION_SUFFIX.len();
         while end > 0 && !line.is_char_boundary(end) {
             end -= 1;
         }
