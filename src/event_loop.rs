@@ -67,6 +67,18 @@ fn handle_log_message(app: &mut App, maybe_line: Option<String>) -> bool {
     }
 }
 
+/// Returns a display-safe representation of a key code for tracing.
+///
+/// Character keys are redacted to `Char(*)` to avoid logging sensitive
+/// user input (e.g., filter queries) into debug log files.
+fn redact_key(code: crossterm::event::KeyCode) -> String {
+    use crossterm::event::KeyCode;
+    match code {
+        KeyCode::Char(_) => "Char(*)".to_string(),
+        other => format!("{:?}", other),
+    }
+}
+
 /// Processes a terminal event (keyboard, mouse, or error).
 ///
 /// Returns the updated consecutive error count. Sets `app.should_quit` when
@@ -78,7 +90,7 @@ fn handle_terminal_event(
 ) -> u32 {
     match maybe_event {
         Some(Ok(Event::Key(key))) => {
-            tracing::trace!(?key, "Key event");
+            tracing::trace!(code = %redact_key(key.code), "Key event");
             handle_key_event(app, key);
             0
         }
