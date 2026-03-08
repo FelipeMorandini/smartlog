@@ -58,6 +58,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore] // Writes escape sequences to stdout; run with --ignored
     fn test_terminal_guard_drop_does_not_panic() {
         // TerminalGuard::drop runs cleanup commands that may fail gracefully
         // in non-TTY environments. The key invariant is that it never panics.
@@ -66,6 +67,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Writes escape sequences to stdout; run with --ignored
     fn test_terminal_guard_multiple_drops_safe() {
         // Dropping multiple guards sequentially should not cause issues.
         // In production only one guard exists, but this tests idempotency.

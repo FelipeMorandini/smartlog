@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use tokio::fs;
-use tokio::io::{AsyncReadExt, AsyncSeekExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncSeekExt, BufReader};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -142,66 +142,81 @@ async fn read_new_lines(
 /// exceeds the limit, the remainder is drained byte-by-byte until `\n` or EOF.
 /// Returns the number of bytes consumed (including the newline), or `0` at EOF.
 /// Invalid UTF-8 sequences are replaced with the Unicode replacement character.
-/// Discards bytes from the reader until a newline or EOF is reached.
+/// Drains bytes from the reader until a newline (`\n`) or EOF is reached.
 ///
-/// Returns the number of bytes consumed during the drain.
+/// Used after detecting that a line exceeded `MAX_LOG_LINE_SIZE` to skip
+/// the remainder without allocating memory for it. Reads in chunks via
+/// `fill_buf`/`consume` for efficiency.
 async fn drain_until_newline<R: tokio::io::AsyncRead + Unpin>(
     reader: &mut BufReader<R>,
-) -> std::io::Result<usize> {
-    let mut drained: usize = 0;
-    let mut byte = [0u8; 1];
+) -> std::io::Result<()> {
     loop {
-        match reader.read(&mut byte).await? {
-            0 => break,
-            _ => {
-                drained += 1;
-                if byte[0] == b'\n' {
-                    break;
-                }
-            }
+        let buf = reader.fill_buf().await?;
+        if buf.is_empty() {
+            return Ok(()); // EOF
         }
+        if let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+            reader.consume(pos + 1);
+            return Ok(());
+        }
+        let len = buf.len();
+        reader.consume(len);
     }
-    Ok(drained)
 }
 
-/// Reads a single line with bounded allocation.
+/// Reads a single line with bounded retained length.
 ///
-/// Reads up to `MAX_LOG_LINE_SIZE + 1` bytes. If the line exceeds the limit,
-/// the remainder is drained. Returns `0` at EOF.
-/// Invalid UTF-8 is replaced with the Unicode replacement character.
+/// Collects up to `MAX_LOG_LINE_SIZE` bytes into `buf`. If the line exceeds
+/// the limit, the remainder is drained without allocation. Returns `0` at
+/// EOF. Strips trailing `\r\n` / `\n`. Reuses the caller-provided buffer.
 async fn read_line_bounded<R: tokio::io::AsyncRead + Unpin>(
     reader: &mut BufReader<R>,
     buf: &mut String,
 ) -> std::io::Result<usize> {
     buf.clear();
-    let limit = MAX_LOG_LINE_SIZE + 1;
-    let mut raw = Vec::with_capacity(1024.min(limit));
+    let limit = MAX_LOG_LINE_SIZE;
     let mut total_consumed: usize = 0;
-    let mut byte = [0u8; 1];
+    let mut found_newline = false;
 
-    while raw.len() < limit {
-        match reader.read(&mut byte).await? {
-            0 => break,
-            _ => {
-                total_consumed += 1;
-                if byte[0] == b'\n' {
-                    break;
-                }
-                raw.push(byte[0]);
-            }
+    loop {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
+            break; // EOF
+        }
+        let newline_pos = available.iter().position(|&b| b == b'\n');
+        let chunk_end = newline_pos.unwrap_or(available.len());
+        let remaining_capacity = limit.saturating_sub(buf.len());
+        let to_copy = chunk_end.min(remaining_capacity);
+
+        if to_copy > 0 {
+            let slice = &available[..to_copy];
+            buf.push_str(&String::from_utf8_lossy(slice));
+        }
+
+        let consume_len = if newline_pos.is_some() {
+            chunk_end + 1
+        } else {
+            chunk_end
+        };
+        total_consumed += consume_len;
+        reader.consume(consume_len);
+
+        if newline_pos.is_some() {
+            found_newline = true;
+            break;
         }
     }
 
-    if raw.len() >= limit {
-        total_consumed += drain_until_newline(reader).await?;
+    // If we hit the limit without finding a newline, drain the rest of the line
+    if buf.len() >= limit && !found_newline {
+        drain_until_newline(reader).await?;
     }
 
-    if raw.last() == Some(&b'\r') {
-        raw.pop();
+    // Strip trailing \r for Windows-style line endings
+    if buf.ends_with('\r') {
+        buf.pop();
     }
 
-    *buf = String::from_utf8(raw)
-        .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
     Ok(total_consumed)
 }
 

@@ -52,7 +52,7 @@ const MAX_CONSECUTIVE_EVENT_ERRORS: u32 = 50;
 ///
 /// Returns `true` if the channel is still open, `false` when the producer
 /// has ended (channel yields `None`).
-pub fn handle_log_message(app: &mut App, maybe_line: Option<String>) -> bool {
+fn handle_log_message(app: &mut App, maybe_line: Option<String>) -> bool {
     match maybe_line {
         Some(line) => {
             let entry = parse_log(line);
@@ -67,7 +67,7 @@ pub fn handle_log_message(app: &mut App, maybe_line: Option<String>) -> bool {
 ///
 /// Returns the updated consecutive error count. Sets `app.should_quit` when
 /// the error threshold is reached or the event stream ends.
-pub fn handle_terminal_event(
+fn handle_terminal_event(
     app: &mut App,
     maybe_event: Option<Result<Event, io::Error>>,
     consecutive_errors: u32,
@@ -101,7 +101,7 @@ pub fn handle_terminal_event(
 }
 
 /// Updates the visible height from the current terminal size.
-pub fn update_visible_height(app: &mut App) {
+fn update_visible_height(app: &mut App) {
     if let Ok(size) = crossterm::terminal::size() {
         app.visible_height = size.1.saturating_sub(5);
     }
@@ -254,7 +254,7 @@ mod tests {
     #[test]
     fn test_handle_terminal_event_error_increments() {
         let mut app = App::new();
-        let err = io::Error::new(io::ErrorKind::Other, "test");
+        let err = io::Error::other("test");
         let errors = handle_terminal_event(&mut app, Some(Err(err)), 0);
         assert_eq!(errors, 1);
         assert!(!app.should_quit);
@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn test_handle_terminal_event_error_threshold_quits() {
         let mut app = App::new();
-        let err = io::Error::new(io::ErrorKind::Other, "test");
+        let err = io::Error::other("test");
         let errors = handle_terminal_event(&mut app, Some(Err(err)), 49);
         assert_eq!(errors, 50);
         assert!(app.should_quit);
