@@ -1,8 +1,21 @@
 //! Application state management and core logic.
 
 use crate::config::MAX_LOG_BUFFER_SIZE;
-use crate::parser::LogEntry;
+use crate::parser::{LogEntry, LogLevel};
+use regex::Regex;
 use std::collections::VecDeque;
+
+/// Internal text matching strategy.
+enum TextMatcher {
+    /// No text filter active
+    None,
+    /// Case-insensitive substring match
+    Substring(String),
+    /// Compiled regex pattern
+    Regex(Regex),
+    /// Invalid regex (matches nothing)
+    Invalid,
+}
 
 /// The input mode for the application.
 #[derive(PartialEq, Debug)]
@@ -31,6 +44,12 @@ pub struct App {
     pub logs_processed: usize,
     /// Visible height of the log area (updated each frame from terminal size)
     pub visible_height: u16,
+    /// Whether line wrapping is enabled
+    pub line_wrap: bool,
+    /// Minimum log level filter (None = show all)
+    pub min_log_level: Option<LogLevel>,
+    /// Whether to use regex for text filtering
+    pub use_regex: bool,
 }
 
 impl Default for App {
@@ -51,6 +70,9 @@ impl App {
             should_quit: false,
             logs_processed: 0,
             visible_height: 20,
+            line_wrap: true,
+            min_log_level: None,
+            use_regex: false,
         }
     }
 
@@ -108,17 +130,13 @@ impl App {
         self.auto_scroll = true;
     }
 
-    /// Returns the filtered log entries based on the current search query.
+    /// Returns the filtered log entries based on text query and log level.
     pub fn get_filtered_logs(&self) -> Vec<&LogEntry> {
-        if self.input_buffer.is_empty() {
-            self.logs.iter().collect()
-        } else {
-            let q = self.input_buffer.to_lowercase();
-            self.logs
-                .iter()
-                .filter(|l| l.pretty.to_lowercase().contains(&q))
-                .collect()
-        }
+        let matcher = self.build_text_matcher();
+        self.logs
+            .iter()
+            .filter(|l| self.matches_level(l) && Self::matches_text(l, &matcher))
+            .collect()
     }
 
     /// Clamps `scroll` so it does not exceed the last filtered entry index.
@@ -133,14 +151,58 @@ impl App {
 
     /// Returns the number of log entries matching the current filter.
     pub fn get_filtered_count(&self) -> usize {
+        let matcher = self.build_text_matcher();
+        self.logs
+            .iter()
+            .filter(|l| self.matches_level(l) && Self::matches_text(l, &matcher))
+            .count()
+    }
+
+    /// Cycles the minimum log level filter.
+    pub fn cycle_log_level(&mut self) {
+        self.min_log_level = match self.min_log_level {
+            None => Some(LogLevel::Error),
+            Some(level) => level.next_filter(),
+        };
+    }
+
+    /// Returns true if the compiled regex (when in regex mode) is invalid.
+    pub fn is_regex_invalid(&self) -> bool {
+        self.use_regex
+            && !self.input_buffer.is_empty()
+            && Regex::new(&format!("(?i){}", &self.input_buffer)).is_err()
+    }
+
+    /// Builds a text matcher from the current input buffer and mode.
+    fn build_text_matcher(&self) -> TextMatcher {
         if self.input_buffer.is_empty() {
-            self.logs.len()
+            return TextMatcher::None;
+        }
+        if self.use_regex {
+            match Regex::new(&format!("(?i){}", &self.input_buffer)) {
+                Ok(re) => TextMatcher::Regex(re),
+                Err(_) => TextMatcher::Invalid,
+            }
         } else {
-            let q = self.input_buffer.to_lowercase();
-            self.logs
-                .iter()
-                .filter(|l| l.pretty.to_lowercase().contains(&q))
-                .count()
+            TextMatcher::Substring(self.input_buffer.to_lowercase())
+        }
+    }
+
+    /// Checks if an entry matches the current log level filter.
+    fn matches_level(&self, entry: &LogEntry) -> bool {
+        match self.min_log_level {
+            None => true,
+            Some(min) => entry.level.severity() <= min.severity(),
+        }
+    }
+
+    /// Checks if an entry matches the text filter.
+    fn matches_text(entry: &LogEntry, matcher: &TextMatcher) -> bool {
+        match matcher {
+            TextMatcher::None => true,
+            TextMatcher::Substring(q) => entry.pretty.to_lowercase().contains(q.as_str()),
+            TextMatcher::Regex(re) => re.is_match(&entry.pretty),
+            TextMatcher::Invalid => false,
         }
     }
 }
@@ -167,6 +229,9 @@ mod tests {
         assert_eq!(app.scroll, 0);
         assert!(app.auto_scroll);
         assert!(!app.should_quit);
+        assert!(app.line_wrap);
+        assert!(app.min_log_level.is_none());
+        assert!(!app.use_regex);
     }
 
     #[test]
@@ -379,5 +444,154 @@ mod tests {
         app.on_log(make_entry("goodbye", LogLevel::Info));
         app.input_buffer = "HELLO".to_string();
         assert_eq!(app.get_filtered_logs().len(), 1);
+    }
+
+    // --- Log level filtering tests ---
+
+    #[test]
+    fn test_cycle_log_level_sequence() {
+        let mut app = App::new();
+        assert!(app.min_log_level.is_none());
+        app.cycle_log_level();
+        assert_eq!(app.min_log_level, Some(LogLevel::Error));
+        app.cycle_log_level();
+        assert_eq!(app.min_log_level, Some(LogLevel::Warn));
+        app.cycle_log_level();
+        assert_eq!(app.min_log_level, Some(LogLevel::Info));
+        app.cycle_log_level();
+        assert_eq!(app.min_log_level, Some(LogLevel::Debug));
+        app.cycle_log_level();
+        assert!(app.min_log_level.is_none());
+    }
+
+    #[test]
+    fn test_level_filter_error_only() {
+        let mut app = App::new();
+        app.on_log(make_entry("err msg", LogLevel::Error));
+        app.on_log(make_entry("warn msg", LogLevel::Warn));
+        app.on_log(make_entry("info msg", LogLevel::Info));
+        app.min_log_level = Some(LogLevel::Error);
+        assert_eq!(app.get_filtered_count(), 1);
+        assert_eq!(app.get_filtered_logs()[0].pretty, "err msg");
+    }
+
+    #[test]
+    fn test_level_filter_warn_and_above() {
+        let mut app = App::new();
+        app.on_log(make_entry("err", LogLevel::Error));
+        app.on_log(make_entry("warn", LogLevel::Warn));
+        app.on_log(make_entry("info", LogLevel::Info));
+        app.on_log(make_entry("debug", LogLevel::Debug));
+        app.min_log_level = Some(LogLevel::Warn);
+        assert_eq!(app.get_filtered_count(), 2);
+    }
+
+    #[test]
+    fn test_level_filter_includes_unknown_only_when_none() {
+        let mut app = App::new();
+        app.on_log(make_entry("unknown", LogLevel::Unknown));
+        app.on_log(make_entry("err", LogLevel::Error));
+        // No level filter -> both shown
+        assert_eq!(app.get_filtered_count(), 2);
+        // Error filter -> only error (Unknown severity=4 > Error severity=0)
+        app.min_log_level = Some(LogLevel::Error);
+        assert_eq!(app.get_filtered_count(), 1);
+    }
+
+    #[test]
+    fn test_level_and_text_filter_combined() {
+        let mut app = App::new();
+        app.on_log(make_entry("error: disk full", LogLevel::Error));
+        app.on_log(make_entry("error: network", LogLevel::Error));
+        app.on_log(make_entry("warn: disk usage", LogLevel::Warn));
+        app.min_log_level = Some(LogLevel::Error);
+        app.input_buffer = "disk".to_string();
+        assert_eq!(app.get_filtered_count(), 1);
+        assert_eq!(app.get_filtered_logs()[0].pretty, "error: disk full");
+    }
+
+    // --- Regex filtering tests ---
+
+    #[test]
+    fn test_regex_filter_basic() {
+        let mut app = App::new();
+        app.on_log(make_entry("error 404", LogLevel::Error));
+        app.on_log(make_entry("error 500", LogLevel::Error));
+        app.on_log(make_entry("info ok", LogLevel::Info));
+        app.use_regex = true;
+        app.input_buffer = r"error \d+".to_string();
+        assert_eq!(app.get_filtered_count(), 2);
+    }
+
+    #[test]
+    fn test_regex_filter_case_insensitive() {
+        let mut app = App::new();
+        app.on_log(make_entry("ERROR happened", LogLevel::Error));
+        app.on_log(make_entry("error too", LogLevel::Error));
+        app.use_regex = true;
+        app.input_buffer = "error".to_string();
+        assert_eq!(app.get_filtered_count(), 2);
+    }
+
+    #[test]
+    fn test_regex_invalid_matches_nothing() {
+        let mut app = App::new();
+        app.on_log(make_entry("hello", LogLevel::Info));
+        app.use_regex = true;
+        app.input_buffer = "[invalid".to_string();
+        assert_eq!(app.get_filtered_count(), 0);
+    }
+
+    #[test]
+    fn test_is_regex_invalid_true() {
+        let mut app = App::new();
+        app.use_regex = true;
+        app.input_buffer = "[bad".to_string();
+        assert!(app.is_regex_invalid());
+    }
+
+    #[test]
+    fn test_is_regex_invalid_false_valid() {
+        let mut app = App::new();
+        app.use_regex = true;
+        app.input_buffer = r"\d+".to_string();
+        assert!(!app.is_regex_invalid());
+    }
+
+    #[test]
+    fn test_is_regex_invalid_false_empty() {
+        let mut app = App::new();
+        app.use_regex = true;
+        assert!(!app.is_regex_invalid());
+    }
+
+    #[test]
+    fn test_is_regex_invalid_false_when_not_regex_mode() {
+        let mut app = App::new();
+        app.use_regex = false;
+        app.input_buffer = "[bad".to_string();
+        assert!(!app.is_regex_invalid());
+    }
+
+    #[test]
+    fn test_regex_empty_buffer_shows_all() {
+        let mut app = App::new();
+        app.on_log(make_entry("a", LogLevel::Info));
+        app.on_log(make_entry("b", LogLevel::Info));
+        app.use_regex = true;
+        assert_eq!(app.get_filtered_count(), 2);
+    }
+
+    #[test]
+    fn test_regex_and_level_filter_combined() {
+        let mut app = App::new();
+        app.on_log(make_entry("error: code 42", LogLevel::Error));
+        app.on_log(make_entry("warn: code 42", LogLevel::Warn));
+        app.on_log(make_entry("info: code 99", LogLevel::Info));
+        app.use_regex = true;
+        app.input_buffer = r"code \d{2}".to_string();
+        app.min_log_level = Some(LogLevel::Warn);
+        // error + warn match level, all 3 match regex, but info is filtered by level
+        assert_eq!(app.get_filtered_count(), 2);
     }
 }
