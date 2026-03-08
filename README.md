@@ -92,6 +92,11 @@ tail -f /var/log/app.log | smartlog
 | `ESC` | Exit filter mode / Clear filter / Re-enable auto-scroll |
 | `↑` or `k` | Scroll up (pauses auto-scroll) |
 | `↓` or `j` | Scroll down |
+| `PageUp` | Scroll up by one page |
+| `PageDown` | Scroll down by one page |
+| `Home` or `g` | Jump to top |
+| `End` or `G` | Jump to bottom (re-enables auto-scroll) |
+| `Enter` | Apply filter (in filter mode) |
 | `q` | Quit application |
 
 ## 🔎 Filter Mode
@@ -131,7 +136,7 @@ For non-JSON logs, SmartLog scans for keywords:
 2024-12-13 10:30:45 ERROR Database connection timeout
 ```
 
-Keywords: `error`, `warn`, `info` (case-insensitive)
+Keywords: `error`, `fatal`, `warn`, `info`, `debug`, `trace` (case-insensitive)
 
 ## 🏗️ Architecture
 
@@ -144,7 +149,7 @@ SmartLog is built with modern Rust async patterns:
 
 ### Performance
 
-- **Zero-copy streaming**: Logs are processed as they arrive without blocking
+- **Async non-blocking streaming**: Logs are processed as they arrive without blocking
 - **Efficient buffering**: Maintains last 2000 logs in memory (configurable in code)
 - **Async I/O**: File tailing and terminal rendering happen concurrently
 - **Fast JSON parsing**: Uses serde_json for high-performance parsing

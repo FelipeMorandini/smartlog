@@ -19,9 +19,3 @@ pub const CHANNEL_BUFFER_SIZE: usize = 100;
 /// This determines how frequently we check for new content in tailed files.
 /// Lower values = more responsive but higher CPU usage.
 pub const FILE_POLL_INTERVAL_MS: u64 = 500;
-
-/// UI event polling interval in milliseconds.
-///
-/// This determines how frequently we check for user input.
-/// Affects UI responsiveness vs CPU usage trade-off.
-pub const UI_POLL_INTERVAL_MS: u64 = 100;
