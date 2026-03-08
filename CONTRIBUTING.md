@@ -27,7 +27,7 @@ cargo build
 cargo run -- --file /path/to/logfile
 ```
 
-4. Run tests (when available):
+4. Run tests:
 ```bash
 cargo test
 ```

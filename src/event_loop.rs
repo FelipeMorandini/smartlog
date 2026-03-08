@@ -6,7 +6,7 @@
 //! - OS shutdown signals
 
 use crossterm::event::{Event, EventStream};
-use futures::StreamExt;
+use futures_util::StreamExt;
 use ratatui::backend::Backend;
 use ratatui::Terminal;
 use std::{future::Future, io};

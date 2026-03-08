@@ -12,7 +12,25 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  validate-version:
+    name: Validate version tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tag matches Cargo.toml version
+        shell: bash
+        run: |
+          CARGO_VERSION="v$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')"
+          TAG="${GITHUB_REF_NAME}"
+          if [ "$CARGO_VERSION" != "$TAG" ]; then
+            echo "::error::Tag $TAG does not match Cargo.toml version $CARGO_VERSION"
+            exit 1
+          fi
+          echo "Version validated: $TAG == $CARGO_VERSION"
+
   build:
+    needs: validate-version
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -77,7 +95,7 @@ jobs:
         shell: bash
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../smartlog-${{ github.ref_name }}-${{ matrix.target }}.tar.gz smartlog
+          tar czf ../../../smartlog-${{ matrix.target }}.tar.gz smartlog
           cd ../../..
 
       # Package as zip for Windows
@@ -89,7 +107,7 @@ jobs:
           $bin = "$releaseDir/smartlog.exe"
           if (Test-Path $bin) {
             Push-Location $releaseDir
-            Compress-Archive -Path "smartlog.exe" -DestinationPath "../../../smartlog-${{ github.ref_name }}-${{ matrix.target }}.zip"
+            Compress-Archive -Path "smartlog.exe" -DestinationPath "../../../smartlog-${{ matrix.target }}.zip"
             Pop-Location
           } else {
             Write-Error "Binary not found at $bin"
@@ -100,7 +118,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: smartlog-${{ matrix.target }}
-          path: smartlog-${{ github.ref_name }}-${{ matrix.target }}.*
+          path: smartlog-${{ matrix.target }}.*
 
   release:
     name: Create Release
