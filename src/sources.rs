@@ -386,7 +386,8 @@ mod tests {
         let _ = read_line_bounded(&mut reader, &mut buf, &mut raw)
             .await
             .unwrap();
-        // Buffer should be capped at MAX_LOG_LINE_SIZE
+        // Raw byte buffer is capped at MAX_LOG_LINE_SIZE. For valid UTF-8
+        // input (as here), buf length matches the raw length exactly.
         assert!(buf.len() <= MAX_LOG_LINE_SIZE);
     }
 
@@ -397,7 +398,7 @@ mod tests {
         let mut reader = TokioBufReader::new(data.as_bytes());
         let mut buf = String::new();
         let mut raw = Vec::new();
-        // First line: oversized, should be drained
+        // First line: oversized, raw bytes capped then remainder drained
         let _ = read_line_bounded(&mut reader, &mut buf, &mut raw)
             .await
             .unwrap();
@@ -433,7 +434,7 @@ mod tests {
     async fn test_read_line_bounded_invalid_utf8_replacement() {
         // Include invalid UTF-8 bytes between 'a' and 'b'.
         let data: &[u8] = b"a\xF0\x28\x8C\x28b\n";
-        let mut reader = TokioBufReader::new(&data[..]);
+        let mut reader = TokioBufReader::new(data);
         let mut buf = String::new();
         let mut raw = Vec::new();
         let _ = read_line_bounded(&mut reader, &mut buf, &mut raw)
