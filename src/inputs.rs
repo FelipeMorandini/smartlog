@@ -409,8 +409,15 @@ mod tests {
 
     #[test]
     fn test_e_triggers_export() {
-        let dir = std::env::temp_dir().join("smartlog_test_e_key");
-        let _ = std::fs::create_dir_all(&dir);
+        let dir = std::env::temp_dir().join(format!(
+            "smartlog_test_e_key_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
         let mut app = app_with_logs(3);
         app.export_dir = dir.clone();
 

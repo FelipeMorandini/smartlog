@@ -648,6 +648,21 @@ mod tests {
 
     // --- Export and source label tests ---
 
+    /// Creates a unique temporary directory for test isolation.
+    fn unique_temp_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "smartlog_test_{}_{}_{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
     #[test]
     fn test_clear_export_message() {
         let mut app = App::new();
@@ -665,8 +680,7 @@ mod tests {
 
     #[test]
     fn test_export_logs_creates_file() {
-        let dir = std::env::temp_dir().join("smartlog_test_export");
-        let _ = std::fs::create_dir_all(&dir);
+        let dir = unique_temp_dir("export");
         let mut app = App::new();
         app.export_dir = dir.clone();
         app.on_log(make_entry("line one", LogLevel::Info));
@@ -688,19 +702,17 @@ mod tests {
                     .starts_with("smartlog_export_")
             })
             .collect();
-        assert!(!files.is_empty());
+        assert_eq!(files.len(), 1);
         let content = std::fs::read_to_string(files[0].path()).unwrap();
         assert!(content.contains("line one"));
         assert!(content.contains("line two"));
 
-        // Cleanup
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn test_export_logs_with_filter() {
-        let dir = std::env::temp_dir().join("smartlog_test_export_filter");
-        let _ = std::fs::create_dir_all(&dir);
+        let dir = unique_temp_dir("export_filter");
         let mut app = App::new();
         app.export_dir = dir.clone();
         app.on_log(make_entry("keep this", LogLevel::Info));
@@ -717,8 +729,7 @@ mod tests {
 
     #[test]
     fn test_export_logs_empty_results() {
-        let dir = std::env::temp_dir().join("smartlog_test_export_empty");
-        let _ = std::fs::create_dir_all(&dir);
+        let dir = unique_temp_dir("export_empty");
         let mut app = App::new();
         app.export_dir = dir.clone();
         app.input_buffer = "nomatch".to_string();
