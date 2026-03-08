@@ -37,8 +37,10 @@ fn test_file_flag_with_nonexistent_path_exits_gracefully() {
     // When run without a real terminal (e.g., in CI), terminal init fails
     // and the process exits with a non-zero code. This verifies argument
     // parsing succeeds and the app doesn't panic.
+    let path = std::env::temp_dir().join("smartlog-test-nonexistent.log");
     smartlog()
-        .args(["--file", "/tmp/smartlog-test-nonexistent.log"])
+        .args(["--file", path.to_str().unwrap()])
+        .timeout(std::time::Duration::from_secs(5))
         .assert()
         .failure()
         .stderr(predicate::str::is_empty().not());

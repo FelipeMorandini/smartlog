@@ -140,17 +140,22 @@ async fn read_new_lines(
     }
 }
 
+/// Suffix appended to truncated lines.
+const TRUNCATION_SUFFIX: &str = " ... [truncated]";
+
 /// Truncates a line in-place if it exceeds [`MAX_LOG_LINE_SIZE`] bytes.
 ///
-/// Truncation respects UTF-8 char boundaries so we never produce invalid strings.
+/// The resulting string (including the truncation suffix) is guaranteed to
+/// be at most `MAX_LOG_LINE_SIZE` bytes. Truncation respects UTF-8 char
+/// boundaries so we never produce invalid strings.
 fn truncate_line(line: &mut String) {
     if line.len() > MAX_LOG_LINE_SIZE {
-        let mut end = MAX_LOG_LINE_SIZE;
+        let mut end = MAX_LOG_LINE_SIZE.saturating_sub(TRUNCATION_SUFFIX.len());
         while end > 0 && !line.is_char_boundary(end) {
             end -= 1;
         }
         line.truncate(end);
-        line.push_str(" ... [truncated]");
+        line.push_str(TRUNCATION_SUFFIX);
     }
 }
 
@@ -237,8 +242,8 @@ mod tests {
     fn test_truncate_line_over_limit() {
         let mut line = "a".repeat(MAX_LOG_LINE_SIZE + 100);
         truncate_line(&mut line);
-        assert!(line.ends_with(" ... [truncated]"));
-        assert!(line.len() <= MAX_LOG_LINE_SIZE + " ... [truncated]".len());
+        assert!(line.ends_with(TRUNCATION_SUFFIX));
+        assert!(line.len() <= MAX_LOG_LINE_SIZE);
     }
 
     #[test]
@@ -246,7 +251,8 @@ mod tests {
         // Multi-byte char: each is 3 bytes in UTF-8
         let mut line = "\u{4e16}".repeat(MAX_LOG_LINE_SIZE);
         truncate_line(&mut line);
-        assert!(line.ends_with(" ... [truncated]"));
+        assert!(line.ends_with(TRUNCATION_SUFFIX));
+        assert!(line.len() <= MAX_LOG_LINE_SIZE);
         // Must still be valid UTF-8
         let _ = line.as_str();
     }
