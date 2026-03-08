@@ -127,9 +127,13 @@ async fn read_new_lines(
                 while buf.ends_with(['\n', '\r']) {
                     buf.pop();
                 }
+                let was_oversized = buf.len() > MAX_LOG_LINE_SIZE;
                 truncate_line(buf);
                 if tx.send(buf.clone()).await.is_err() {
                     return Err(()); // Receiver dropped
+                }
+                if was_oversized {
+                    buf.shrink_to(MAX_LOG_LINE_SIZE);
                 }
             }
             Err(e) => {
@@ -180,9 +184,13 @@ fn spawn_stdin_reader(tx: mpsc::Sender<String>) -> JoinHandle<()> {
                             buf.pop();
                         }
                     }
+                    let was_oversized = buf.len() > MAX_LOG_LINE_SIZE;
                     truncate_line(&mut buf);
                     if tx.send(buf.clone()).await.is_err() {
                         return; // Receiver dropped
+                    }
+                    if was_oversized {
+                        buf.shrink_to(MAX_LOG_LINE_SIZE);
                     }
                 }
                 Err(e) => {
