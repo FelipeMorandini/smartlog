@@ -47,7 +47,7 @@ impl LogLevel {
             Self::Warn => "WARN",
             Self::Info => "INFO",
             Self::Debug => "DEBUG",
-            Self::Unknown => "ALL",
+            Self::Unknown => "UNKNOWN",
         }
     }
 }
@@ -410,7 +410,7 @@ mod tests {
         assert_eq!(LogLevel::Warn.label(), "WARN");
         assert_eq!(LogLevel::Info.label(), "INFO");
         assert_eq!(LogLevel::Debug.label(), "DEBUG");
-        assert_eq!(LogLevel::Unknown.label(), "ALL");
+        assert_eq!(LogLevel::Unknown.label(), "UNKNOWN");
     }
 
     #[test]

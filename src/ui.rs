@@ -5,7 +5,7 @@
 use crate::app::{App, InputMode};
 use crate::parser::{style_log, LogEntry};
 use ratatui::{
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
@@ -107,7 +107,8 @@ pub fn ui(f: &mut Frame, app: &App) {
         .constraints([Constraint::Min(1), Constraint::Length(3)])
         .split(f.area());
 
-    let query = &app.input_buffer;
+    // In regex mode, skip substring highlighting (regex highlight is tracked in TD-7)
+    let highlight_query = if app.use_regex { "" } else { &app.input_buffer };
     let filtered_logs = app.get_filtered_logs();
     let viewport_height = chunks[0].height.saturating_sub(2) as usize;
     let viewport_width = chunks[0].width.saturating_sub(2) as usize;
@@ -125,7 +126,7 @@ pub fn ui(f: &mut Frame, app: &App) {
 
     let styled_logs: Vec<_> = filtered_logs[scroll_entry..]
         .iter()
-        .map(|log| style_log(log, query))
+        .map(|log| style_log(log, highlight_query))
         .collect();
 
     let mut logs_block = Paragraph::new(styled_logs)
@@ -139,7 +140,7 @@ pub fn ui(f: &mut Frame, app: &App) {
 }
 
 /// Renders the input bar with search query and status indicators.
-fn render_input_bar(f: &mut Frame, app: &App, shown: usize, area: ratatui::layout::Rect) {
+fn render_input_bar(f: &mut Frame, app: &App, shown: usize, area: Rect) {
     let (input_style, border_style) = match app.input_mode {
         InputMode::Normal => (Style::default(), Style::default()),
         InputMode::Editing => (

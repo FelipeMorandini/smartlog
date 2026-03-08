@@ -151,11 +151,7 @@ impl App {
 
     /// Returns the number of log entries matching the current filter.
     pub fn get_filtered_count(&self) -> usize {
-        let matcher = self.build_text_matcher();
-        self.logs
-            .iter()
-            .filter(|l| self.matches_level(l) && Self::matches_text(l, &matcher))
-            .count()
+        self.get_filtered_logs().len()
     }
 
     /// Cycles the minimum log level filter.
@@ -168,9 +164,10 @@ impl App {
 
     /// Returns true if the compiled regex (when in regex mode) is invalid.
     pub fn is_regex_invalid(&self) -> bool {
-        self.use_regex
-            && !self.input_buffer.is_empty()
-            && Regex::new(&format!("(?i){}", &self.input_buffer)).is_err()
+        if !self.use_regex || self.input_buffer.is_empty() {
+            return false;
+        }
+        matches!(self.build_text_matcher(), TextMatcher::Invalid)
     }
 
     /// Builds a text matcher from the current input buffer and mode.
