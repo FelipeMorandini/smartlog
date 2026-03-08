@@ -15,6 +15,7 @@ use tokio::sync::mpsc;
 use crate::app::App;
 use crate::inputs::handle_key_event;
 use crate::parser::parse_log;
+use crate::sources::RawLogMessage;
 use crate::ui::ui;
 
 /// Creates a future that completes when a shutdown signal is received.
@@ -52,11 +53,12 @@ const MAX_CONSECUTIVE_EVENT_ERRORS: u32 = 50;
 ///
 /// Returns `true` if the channel is still open, `false` when the producer
 /// has ended (channel yields `None`).
-fn handle_log_message(app: &mut App, maybe_line: Option<String>) -> bool {
-    match maybe_line {
-        Some(line) => {
-            tracing::trace!(len = line.len(), "Log line received");
-            let entry = parse_log(line);
+fn handle_log_message(app: &mut App, maybe_msg: Option<RawLogMessage>) -> bool {
+    match maybe_msg {
+        Some(msg) => {
+            tracing::trace!(len = msg.line.len(), "Log line received");
+            let mut entry = parse_log(msg.line);
+            entry.source = msg.source;
             app.on_log(entry);
             true
         }
@@ -133,7 +135,7 @@ fn update_visible_height(app: &mut App) {
 pub async fn run<B: Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,
-    rx: &mut mpsc::Receiver<String>,
+    rx: &mut mpsc::Receiver<RawLogMessage>,
 ) -> io::Result<()> {
     let mut shutdown_fut =
         std::pin::Pin::from(Box::new(shutdown_signal()) as Box<dyn Future<Output = ()> + Send>);
@@ -147,8 +149,8 @@ pub async fn run<B: Backend>(
         update_visible_height(app);
 
         tokio::select! {
-            maybe_line = rx.recv(), if channel_open => {
-                channel_open = handle_log_message(app, maybe_line);
+            maybe_msg = rx.recv(), if channel_open => {
+                channel_open = handle_log_message(app, maybe_msg);
             }
             maybe_event = event_stream.next() => {
                 consecutive_event_errors = handle_terminal_event(app, maybe_event, consecutive_event_errors);
@@ -190,12 +192,26 @@ mod tests {
         })))
     }
 
+    fn raw_msg(line: &str) -> Option<RawLogMessage> {
+        Some(RawLogMessage {
+            line: line.to_string(),
+            source: None,
+        })
+    }
+
+    fn raw_msg_with_source(line: &str, source: &str) -> Option<RawLogMessage> {
+        Some(RawLogMessage {
+            line: line.to_string(),
+            source: Some(source.to_string()),
+        })
+    }
+
     // --- handle_log_message tests ---
 
     #[test]
     fn test_handle_log_message_adds_entry() {
         let mut app = App::new();
-        let open = handle_log_message(&mut app, Some("hello".to_string()));
+        let open = handle_log_message(&mut app, raw_msg("hello"));
         assert!(open);
         assert_eq!(app.logs.len(), 1);
         assert_eq!(app.logs[0].raw, "hello");
@@ -207,6 +223,14 @@ mod tests {
         let open = handle_log_message(&mut app, None);
         assert!(!open);
         assert!(!app.should_quit); // App should NOT quit on channel close
+    }
+
+    #[test]
+    fn test_handle_log_message_preserves_source() {
+        let mut app = App::new();
+        let open = handle_log_message(&mut app, raw_msg_with_source("hello", "app.log"));
+        assert!(open);
+        assert_eq!(app.logs[0].source, Some("app.log".to_string()));
     }
 
     // --- handle_terminal_event tests ---

@@ -3,7 +3,7 @@
 use crate::config::{FILE_POLL_INTERVAL_MS, MAX_LOG_LINE_SIZE};
 use std::io::IsTerminal;
 use std::io::SeekFrom;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use tokio::fs;
@@ -11,25 +11,54 @@ use tokio::io::{AsyncBufReadExt, AsyncSeekExt, BufReader};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-/// Spawns the most appropriate log source based on CLI args and whether stdin is a TTY.
+/// A raw log line with optional source metadata.
+///
+/// Used as the channel message type between log sources and the event loop.
+pub struct RawLogMessage {
+    /// The raw log line text.
+    pub line: String,
+    /// Optional source identifier (e.g., filename for multi-file tailing).
+    pub source: Option<String>,
+}
+
+/// Spawns log source(s) based on CLI args and whether stdin is a TTY.
+///
+/// When multiple files are provided, each gets its own tailing task with
+/// source metadata. All tasks share the same channel sender (multi-producer).
 ///
 /// Priority:
-/// - If `file` is Some, tail that file.
+/// - If `files` is non-empty, tail those files.
 /// - Else if stdin is piped (not a TTY), read from stdin.
 /// - Else spawn a mock generator.
-pub fn spawn_source(file: Option<String>, tx: mpsc::Sender<String>) -> JoinHandle<()> {
-    if let Some(path) = file {
-        tracing::info!(path = %path, "Spawning file tail source");
-        return spawn_tail_file(PathBuf::from(path), tx);
+pub fn spawn_sources(files: &[String], tx: mpsc::Sender<RawLogMessage>) -> Vec<JoinHandle<()>> {
+    if !files.is_empty() {
+        let multi = files.len() > 1;
+        return files
+            .iter()
+            .map(|path| {
+                let source = if multi {
+                    Some(
+                        std::path::Path::new(path)
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| path.clone()),
+                    )
+                } else {
+                    None
+                };
+                tracing::info!(path = %path, multi, "Spawning file tail source");
+                spawn_tail_file(PathBuf::from(path), source, tx.clone())
+            })
+            .collect();
     }
 
     if !std::io::stdin().is_terminal() {
         tracing::info!("Spawning stdin source");
-        return spawn_stdin_reader(tx);
+        return vec![spawn_stdin_reader(tx)];
     }
 
     tracing::info!("Spawning mock demo source");
-    spawn_mock(tx)
+    vec![spawn_mock(tx)]
 }
 
 /// Tail a file like `tail -F` (basic):
@@ -37,9 +66,13 @@ pub fn spawn_source(file: Option<String>, tx: mpsc::Sender<String>) -> JoinHandl
 /// - Periodically check for growth and read new lines
 /// - If truncated/rotated, reopen from beginning
 /// - Keeps file handle open across poll cycles for efficiency
-fn spawn_tail_file(path: PathBuf, tx: mpsc::Sender<String>) -> JoinHandle<()> {
+fn spawn_tail_file(
+    path: PathBuf,
+    source: Option<String>,
+    tx: mpsc::Sender<RawLogMessage>,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let mut offset: u64 = wait_for_file(&path, &tx).await;
+        let mut offset: u64 = wait_for_file(&path, &tx, &source).await;
         let mut reader: Option<BufReader<fs::File>> = None;
         let mut buf = String::new();
         let mut raw = Vec::new();
@@ -50,7 +83,10 @@ fn spawn_tail_file(path: PathBuf, tx: mpsc::Sender<String>) -> JoinHandle<()> {
                     let len = meta.len();
                     if len < offset {
                         let _ = tx
-                            .send(format!("⚠️  File truncated or rotated: {}", path.display()))
+                            .send(RawLogMessage {
+                                line: format!("⚠️  File truncated or rotated: {}", path.display()),
+                                source: source.clone(),
+                            })
                             .await;
                         offset = 0;
                         reader = None; // Force reopen
@@ -61,7 +97,10 @@ fn spawn_tail_file(path: PathBuf, tx: mpsc::Sender<String>) -> JoinHandle<()> {
                             reader = open_and_seek(&path, offset).await;
                         }
                         if let Some(ref mut r) = reader {
-                            if read_new_lines(r, &tx, &mut buf, &mut raw).await.is_err() {
+                            if read_new_lines(r, &tx, &source, &mut buf, &mut raw)
+                                .await
+                                .is_err()
+                            {
                                 return; // Receiver dropped
                             }
                             offset = r.stream_position().await.unwrap_or(len);
@@ -70,7 +109,10 @@ fn spawn_tail_file(path: PathBuf, tx: mpsc::Sender<String>) -> JoinHandle<()> {
                 }
                 Err(e) => {
                     let _ = tx
-                        .send(format!("⚠️  File unavailable: {} ({})", path.display(), e))
+                        .send(RawLogMessage {
+                            line: format!("⚠️  File unavailable: {} ({})", path.display(), e),
+                            source: source.clone(),
+                        })
                         .await;
                     offset = 0;
                     reader = None; // Close handle, file may have been deleted
@@ -83,21 +125,29 @@ fn spawn_tail_file(path: PathBuf, tx: mpsc::Sender<String>) -> JoinHandle<()> {
 }
 
 /// Waits for a file to appear and returns its initial length.
-async fn wait_for_file(path: &PathBuf, tx: &mpsc::Sender<String>) -> u64 {
+async fn wait_for_file(
+    path: &Path,
+    tx: &mpsc::Sender<RawLogMessage>,
+    source: &Option<String>,
+) -> u64 {
     match fs::metadata(path).await {
         Ok(meta) => meta.len(),
         Err(e) => {
             let _ = tx
-                .send(format!(
-                    "⚠️  Waiting for file to exist: {} ({})",
-                    path.display(),
-                    e
-                ))
+                .send(RawLogMessage {
+                    line: format!("⚠️  Waiting for file to exist: {} ({})", path.display(), e),
+                    source: source.clone(),
+                })
                 .await;
             loop {
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 if let Ok(meta) = fs::metadata(path).await {
-                    let _ = tx.send(format!("✓ File found: {}", path.display())).await;
+                    let _ = tx
+                        .send(RawLogMessage {
+                            line: format!("✓ File found: {}", path.display()),
+                            source: source.clone(),
+                        })
+                        .await;
                     return meta.len();
                 }
             }
@@ -106,7 +156,7 @@ async fn wait_for_file(path: &PathBuf, tx: &mpsc::Sender<String>) -> u64 {
 }
 
 /// Opens a file and seeks to the given offset, returning a buffered reader.
-async fn open_and_seek(path: &PathBuf, offset: u64) -> Option<BufReader<fs::File>> {
+async fn open_and_seek(path: &Path, offset: u64) -> Option<BufReader<fs::File>> {
     let file = fs::File::open(path).await.ok()?;
     let mut reader = BufReader::new(file);
     reader.seek(SeekFrom::Start(offset)).await.ok()?;
@@ -118,7 +168,8 @@ async fn open_and_seek(path: &PathBuf, offset: u64) -> Option<BufReader<fs::File
 /// Returns `Ok(())` on success or EOF, `Err(())` if the channel receiver was dropped.
 async fn read_new_lines(
     reader: &mut BufReader<fs::File>,
-    tx: &mpsc::Sender<String>,
+    tx: &mpsc::Sender<RawLogMessage>,
+    source: &Option<String>,
     buf: &mut String,
     raw: &mut Vec<u8>,
 ) -> Result<(), ()> {
@@ -127,12 +178,24 @@ async fn read_new_lines(
             Ok(0) => return Ok(()), // EOF reached
             Ok(_) => {
                 truncate_line(buf);
-                if tx.send(buf.clone()).await.is_err() {
+                if tx
+                    .send(RawLogMessage {
+                        line: buf.clone(),
+                        source: source.clone(),
+                    })
+                    .await
+                    .is_err()
+                {
                     return Err(()); // Receiver dropped
                 }
             }
             Err(e) => {
-                let _ = tx.send(format!("⚠️  Error reading line: {}", e)).await;
+                let _ = tx
+                    .send(RawLogMessage {
+                        line: format!("⚠️  Error reading line: {}", e),
+                        source: source.clone(),
+                    })
+                    .await;
                 return Ok(());
             }
         }
@@ -265,7 +328,7 @@ fn truncate_line(line: &mut String) {
 }
 
 /// Spawn a task that reads newline-delimited logs from stdin (piped input).
-fn spawn_stdin_reader(tx: mpsc::Sender<String>) -> JoinHandle<()> {
+fn spawn_stdin_reader(tx: mpsc::Sender<RawLogMessage>) -> JoinHandle<()> {
     tokio::spawn(async move {
         let stdin = tokio::io::stdin();
         let mut reader = BufReader::new(stdin);
@@ -275,18 +338,33 @@ fn spawn_stdin_reader(tx: mpsc::Sender<String>) -> JoinHandle<()> {
         loop {
             match read_line_bounded(&mut reader, &mut buf, &mut raw).await {
                 Ok(0) => {
-                    let _ = tx.send("ℹ️  End of input stream reached".to_string()).await;
+                    let _ = tx
+                        .send(RawLogMessage {
+                            line: "ℹ️  End of input stream reached".to_string(),
+                            source: None,
+                        })
+                        .await;
                     return;
                 }
                 Ok(_) => {
                     truncate_line(&mut buf);
-                    if tx.send(buf.clone()).await.is_err() {
+                    if tx
+                        .send(RawLogMessage {
+                            line: buf.clone(),
+                            source: None,
+                        })
+                        .await
+                        .is_err()
+                    {
                         return; // Receiver dropped
                     }
                 }
                 Err(e) => {
                     let _ = tx
-                        .send(format!("⚠️  Error reading from stdin: {}", e))
+                        .send(RawLogMessage {
+                            line: format!("⚠️  Error reading from stdin: {}", e),
+                            source: None,
+                        })
                         .await;
                     return;
                 }
@@ -296,7 +374,7 @@ fn spawn_stdin_reader(tx: mpsc::Sender<String>) -> JoinHandle<()> {
 }
 
 /// Spawn a mock generator for demo purposes.
-fn spawn_mock(tx: mpsc::Sender<String>) -> JoinHandle<()> {
+fn spawn_mock(tx: mpsc::Sender<RawLogMessage>) -> JoinHandle<()> {
     tokio::spawn(async move {
         let logs = vec![
             r#"{"level": "INFO", "msg": "Service started", "port": 8080, "env": "prod"}"#,
@@ -310,7 +388,7 @@ fn spawn_mock(tx: mpsc::Sender<String>) -> JoinHandle<()> {
             for log in &logs {
                 let mut line = log.to_string();
                 truncate_line(&mut line);
-                if tx.send(line).await.is_err() {
+                if tx.send(RawLogMessage { line, source: None }).await.is_err() {
                     return; // Channel closed
                 }
                 tokio::time::sleep(Duration::from_millis(1500)).await;
@@ -387,8 +465,6 @@ mod tests {
         let _ = read_line_bounded(&mut reader, &mut buf, &mut raw)
             .await
             .unwrap();
-        // Raw byte buffer is capped at MAX_LOG_LINE_SIZE. For valid UTF-8
-        // input (as here), buf length matches the raw length exactly.
         assert!(buf.len() <= MAX_LOG_LINE_SIZE);
     }
 
@@ -399,12 +475,10 @@ mod tests {
         let mut reader = TokioBufReader::new(data.as_bytes());
         let mut buf = String::new();
         let mut raw = Vec::new();
-        // First line: oversized, raw bytes capped then remainder drained
         let _ = read_line_bounded(&mut reader, &mut buf, &mut raw)
             .await
             .unwrap();
         assert!(buf.len() <= MAX_LOG_LINE_SIZE);
-        // Second line: should read cleanly
         let _ = read_line_bounded(&mut reader, &mut buf, &mut raw)
             .await
             .unwrap();
@@ -433,7 +507,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_line_bounded_invalid_utf8_replacement() {
-        // Include invalid UTF-8 bytes between 'a' and 'b'.
         let data: &[u8] = b"a\xF0\x28\x8C\x28b\n";
         let mut reader = TokioBufReader::new(data);
         let mut buf = String::new();
@@ -441,7 +514,6 @@ mod tests {
         let _ = read_line_bounded(&mut reader, &mut buf, &mut raw)
             .await
             .unwrap();
-        // Invalid UTF-8 bytes should be replaced with U+FFFD.
         assert!(buf.contains('\u{FFFD}'));
         assert!(buf.starts_with('a'));
         assert!(buf.ends_with('b'));
@@ -473,14 +545,11 @@ mod tests {
 
     #[test]
     fn test_truncate_line_respects_utf8_boundary() {
-        // Multi-byte char: each is 3 bytes in UTF-8. Create a string that just
-        // exceeds MAX_LOG_LINE_SIZE bytes to trigger truncation without over-allocating.
         let repeat_count = MAX_LOG_LINE_SIZE / 3 + 1;
         let mut line = "\u{4e16}".repeat(repeat_count);
         truncate_line(&mut line);
         assert!(line.ends_with(TRUNCATION_SUFFIX));
         assert!(line.len() <= MAX_LOG_LINE_SIZE);
-        // Must still be valid UTF-8
         let _ = line.as_str();
     }
 

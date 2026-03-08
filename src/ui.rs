@@ -3,10 +3,11 @@
 //! This module handles all the terminal UI rendering using the Ratatui library.
 
 use crate::app::{App, InputMode};
-use crate::parser::{style_log, LogEntry};
+use crate::parser::{format_relative_time, style_log, LogEntry};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
+    style::Style,
+    text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
@@ -68,13 +69,32 @@ fn compute_auto_scroll_entry(
     0
 }
 
+/// Builds the optional suffix indicators (regex, time, theme, source).
+fn build_status_suffix(app: &App) -> String {
+    let regex = if app.use_regex {
+        if app.is_regex_invalid() {
+            " | INVALID REGEX"
+        } else {
+            " | REGEX"
+        }
+    } else {
+        ""
+    };
+    let time = if app.show_timestamps { " | TIME" } else { "" };
+    let theme = format!(" | {}", app.theme.name);
+    let source = if app.source_label.is_empty() {
+        String::new()
+    } else {
+        format!(" | {}", app.source_label)
+    };
+    format!("{regex}{time}{theme}{source}")
+}
+
 /// Builds the status bar title string for the input bar.
 ///
 /// When an export feedback message is present, it overrides the normal status
-/// display. Otherwise shows scroll state, wrap, level, log count, regex mode,
-/// and source label.
+/// display. Otherwise shows scroll state, wrap, level, log count, and suffix indicators.
 fn build_status_title(app: &App, shown: usize, total: usize) -> String {
-    // Export feedback takes priority over normal status
     if let Some(ref msg) = app.last_export_message {
         return format!(" {msg} ");
     }
@@ -89,25 +109,40 @@ fn build_status_title(app: &App, shown: usize, total: usize) -> String {
         Some(l) => format!("≥{}", l.label()),
         None => "ALL".to_string(),
     };
-    let regex = if app.use_regex {
-        if app.is_regex_invalid() {
-            " | INVALID REGEX"
-        } else {
-            " | REGEX"
-        }
-    } else {
-        ""
-    };
-    let source = if app.source_label.is_empty() {
-        String::new()
-    } else {
-        format!(" | {}", app.source_label)
-    };
+    let suffix = build_status_suffix(app);
 
     if shown == total {
-        format!(" / filter | {status} | {wrap} | {level} | {total} logs{regex}{source} ")
+        format!(" / filter | {status} | {wrap} | {level} | {total} logs{suffix} ")
     } else {
-        format!(" / filter | {status} | {wrap} | {level} | {shown}/{total} logs{regex}{source} ")
+        format!(" / filter | {status} | {wrap} | {level} | {shown}/{total} logs{suffix} ")
+    }
+}
+
+/// Prepends optional timestamp and source prefix spans to a styled log line.
+fn prepend_metadata(line: &mut Line<'static>, entry: &LogEntry, app: &App) {
+    // Source prefix (shown when entry has source metadata, e.g., multi-file)
+    if let Some(ref src) = entry.source {
+        line.spans.insert(
+            0,
+            Span::styled(
+                format!("[{src}] "),
+                Style::default().fg(app.theme.source_color),
+            ),
+        );
+    }
+
+    // Timestamp prefix (shown when toggle is active and entry has a timestamp)
+    if app.show_timestamps {
+        if let Some(ts) = entry.timestamp {
+            let relative = format_relative_time(ts);
+            line.spans.insert(
+                0,
+                Span::styled(
+                    format!("[{relative}] "),
+                    Style::default().fg(app.theme.timestamp_color),
+                ),
+            );
+        }
     }
 }
 
@@ -141,7 +176,11 @@ pub fn ui(f: &mut Frame, app: &App) {
 
     let styled_logs: Vec<_> = filtered_logs[scroll_entry..]
         .iter()
-        .map(|log| style_log(log, highlight_query))
+        .map(|log| {
+            let mut line = style_log(log, highlight_query, &app.theme);
+            prepend_metadata(&mut line, log, app);
+            line
+        })
         .collect();
 
     let mut logs_block = Paragraph::new(styled_logs)
@@ -158,10 +197,10 @@ pub fn ui(f: &mut Frame, app: &App) {
 fn render_input_bar(f: &mut Frame, app: &App, shown: usize, area: Rect) {
     let (input_style, border_style) = match app.input_mode {
         InputMode::Normal => (Style::default(), Style::default()),
-        InputMode::Editing => (
-            Style::default().fg(Color::Yellow),
-            Style::default().fg(Color::Yellow),
-        ),
+        InputMode::Editing => {
+            let color = app.theme.input_active;
+            (Style::default().fg(color), Style::default().fg(color))
+        }
     };
     let title = build_status_title(app, shown, app.logs.len());
     let input_block = Paragraph::new(app.input_buffer.as_str())
@@ -179,12 +218,15 @@ fn render_input_bar(f: &mut Frame, app: &App, shown: usize, area: Rect) {
 mod tests {
     use super::*;
     use crate::parser::LogLevel;
+    use crate::theme::Theme;
 
     fn entry(pretty: &str) -> LogEntry {
         LogEntry {
             raw: pretty.to_string(),
             pretty: pretty.to_string(),
             level: LogLevel::Info,
+            timestamp: None,
+            source: None,
         }
     }
 
@@ -311,23 +353,18 @@ mod tests {
 
     #[test]
     fn test_auto_scroll_no_wrap_ignores_width() {
-        // Long line that would wrap at width 5, but with wrap off it's 1 line
         let e1 = entry("abcdefghij");
         let e2 = entry("klmnopqrst");
         let entries: Vec<&LogEntry> = vec![&e1, &e2];
-        // With wrap on: each entry is 2 visual lines at width 5, total 4 > viewport 2
         assert_eq!(compute_auto_scroll_entry(&entries, 2, 5, true), 1);
-        // With wrap off: each entry is 1 raw line, total 2 fits viewport 2
         assert_eq!(compute_auto_scroll_entry(&entries, 2, 5, false), 0);
     }
 
     #[test]
     fn test_auto_scroll_no_wrap_multiline_entry() {
-        // Entry with newlines: 3 raw lines regardless of width
         let e1 = entry("a\nb\nc");
         let e2 = entry("d");
         let entries: Vec<&LogEntry> = vec![&e1, &e2];
-        // 3 + 1 = 4 raw lines, viewport 3 -> start from index 1
         assert_eq!(compute_auto_scroll_entry(&entries, 3, 80, false), 1);
     }
 
@@ -341,6 +378,7 @@ mod tests {
         assert!(title.contains("WRAP"));
         assert!(title.contains("ALL"));
         assert!(title.contains("0 logs"));
+        assert!(title.contains("dark"));
     }
 
     #[test]
@@ -355,7 +393,6 @@ mod tests {
     fn test_status_title_empty_source_label_omitted() {
         let app = App::new();
         let title = build_status_title(&app, 0, 0);
-        // Should not contain a trailing " | " with nothing after it
         assert!(!title.contains("| |"));
     }
 
@@ -372,7 +409,88 @@ mod tests {
         app.last_export_message = Some("Exported 5 logs → test.log".to_string());
         let title = build_status_title(&app, 5, 10);
         assert!(title.contains("Exported 5 logs"));
-        // Normal status info should not appear when export message is shown
         assert!(!title.contains("FOLLOWING"));
+    }
+
+    #[test]
+    fn test_status_title_shows_time_when_enabled() {
+        let mut app = App::new();
+        app.show_timestamps = true;
+        let title = build_status_title(&app, 0, 0);
+        assert!(title.contains("TIME"));
+    }
+
+    #[test]
+    fn test_status_title_hides_time_when_disabled() {
+        let app = App::new();
+        let title = build_status_title(&app, 0, 0);
+        assert!(!title.contains("TIME"));
+    }
+
+    #[test]
+    fn test_status_title_shows_theme_name() {
+        let mut app = App::new();
+        app.theme = Theme::SOLARIZED;
+        let title = build_status_title(&app, 0, 0);
+        assert!(title.contains("solarized"));
+    }
+
+    // --- prepend_metadata tests ---
+
+    #[test]
+    fn test_prepend_metadata_no_source_no_timestamp() {
+        let app = App::new();
+        let e = entry("test");
+        let mut line = Line::from(Span::raw("test"));
+        prepend_metadata(&mut line, &e, &app);
+        assert_eq!(line.spans.len(), 1);
+    }
+
+    #[test]
+    fn test_prepend_metadata_with_source() {
+        let app = App::new();
+        let mut e = entry("test");
+        e.source = Some("app.log".to_string());
+        let mut line = Line::from(Span::raw("test"));
+        prepend_metadata(&mut line, &e, &app);
+        assert_eq!(line.spans.len(), 2);
+        assert!(line.spans[0].content.contains("app.log"));
+    }
+
+    #[test]
+    fn test_prepend_metadata_with_timestamp() {
+        let mut app = App::new();
+        app.show_timestamps = true;
+        let mut e = entry("test");
+        e.timestamp = Some(chrono::Local::now());
+        let mut line = Line::from(Span::raw("test"));
+        prepend_metadata(&mut line, &e, &app);
+        assert_eq!(line.spans.len(), 2);
+        assert!(line.spans[0].content.contains("ago"));
+    }
+
+    #[test]
+    fn test_prepend_metadata_timestamp_and_source() {
+        let mut app = App::new();
+        app.show_timestamps = true;
+        let mut e = entry("test");
+        e.timestamp = Some(chrono::Local::now());
+        e.source = Some("app.log".to_string());
+        let mut line = Line::from(Span::raw("test"));
+        prepend_metadata(&mut line, &e, &app);
+        // timestamp first, then source, then content
+        assert_eq!(line.spans.len(), 3);
+        assert!(line.spans[0].content.contains("ago"));
+        assert!(line.spans[1].content.contains("app.log"));
+    }
+
+    #[test]
+    fn test_prepend_metadata_timestamp_disabled_no_prefix() {
+        let app = App::new(); // show_timestamps = false
+        let mut e = entry("test");
+        e.timestamp = Some(chrono::Local::now());
+        let mut line = Line::from(Span::raw("test"));
+        prepend_metadata(&mut line, &e, &app);
+        assert_eq!(line.spans.len(), 1); // no prefix added
     }
 }
