@@ -6,6 +6,7 @@ use chrono::Local;
 use regex::Regex;
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Internal text matching strategy.
 enum TextMatcher {
@@ -177,9 +178,12 @@ impl App {
     ///
     /// Sets `last_export_message` with the result (success path or error).
     pub fn export_logs(&mut self) {
+        static EXPORT_COUNTER: AtomicU32 = AtomicU32::new(0);
+
         let filtered = self.get_filtered_logs();
         let timestamp = Local::now().format("%Y%m%dT%H%M%S%.3f");
-        let filename = format!("smartlog_export_{}.log", timestamp);
+        let seq = EXPORT_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let filename = format!("smartlog_export_{}_{}.log", timestamp, seq);
         let path = self.export_dir.join(&filename);
 
         let content: String = if filtered.is_empty() {
@@ -744,13 +748,20 @@ mod tests {
 
     #[test]
     fn test_export_logs_invalid_dir() {
+        // Use a regular file as the "directory" — guaranteed to fail on all platforms
+        let file_path =
+            std::env::temp_dir().join(format!("smartlog_test_not_a_dir_{}", std::process::id()));
+        std::fs::write(&file_path, b"not a directory").unwrap();
+
         let mut app = App::new();
-        app.export_dir = PathBuf::from("/nonexistent/path/that/does/not/exist");
+        app.export_dir = file_path.clone();
         app.on_log(make_entry("test", LogLevel::Info));
 
         app.export_logs();
 
         let msg = app.last_export_message.as_ref().unwrap();
         assert!(msg.contains("Export failed"));
+
+        let _ = std::fs::remove_file(&file_path);
     }
 }
