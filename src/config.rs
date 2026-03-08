@@ -16,11 +16,12 @@ pub const CHANNEL_BUFFER_SIZE: usize = 100;
 
 /// Maximum retained length of a single log line in bytes.
 ///
-/// The bounded reader collects at most this many bytes into the line buffer.
-/// Any remaining bytes beyond this limit are drained without allocation.
-/// Lines exceeding this limit are then truncated with a suffix for display.
-/// Note: the `BufReader`'s internal buffer (typically 8 KB) determines the
-/// actual peak memory, not this constant.
+/// The bounded reader collects at most this many raw bytes into its per-line
+/// buffer. Any remaining bytes beyond this limit are drained without further
+/// growth of that buffer, and lines exceeding this limit are truncated with a
+/// suffix for display. This constant therefore bounds the retained raw bytes
+/// per line; overall peak memory for log reading also includes the
+/// `BufReader`'s internal buffer and any temporary UTF-8 decoding overhead.
 pub const MAX_LOG_LINE_SIZE: usize = 65_536; // 64 KB
 
 /// Polling interval for file changes in milliseconds.

@@ -429,6 +429,22 @@ mod tests {
         assert_eq!(buf, "line3");
     }
 
+    #[tokio::test]
+    async fn test_read_line_bounded_invalid_utf8_replacement() {
+        // Include invalid UTF-8 bytes between 'a' and 'b'.
+        let data: &[u8] = b"a\xF0\x28\x8C\x28b\n";
+        let mut reader = TokioBufReader::new(&data[..]);
+        let mut buf = String::new();
+        let mut raw = Vec::new();
+        let _ = read_line_bounded(&mut reader, &mut buf, &mut raw)
+            .await
+            .unwrap();
+        // Invalid UTF-8 bytes should be replaced with U+FFFD.
+        assert!(buf.contains('\u{FFFD}'));
+        assert!(buf.starts_with('a'));
+        assert!(buf.ends_with('b'));
+    }
+
     // --- truncate_line tests ---
 
     #[test]
