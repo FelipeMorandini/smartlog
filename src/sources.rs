@@ -19,15 +19,16 @@ use tokio::task::JoinHandle;
 /// - Else spawn a mock generator.
 pub fn spawn_source(file: Option<String>, tx: mpsc::Sender<String>) -> JoinHandle<()> {
     if let Some(path) = file {
+        tracing::info!(path = %path, "Spawning file tail source");
         return spawn_tail_file(PathBuf::from(path), tx);
     }
 
-    // Detect if stdin is piped; if so, read from it.
     if !std::io::stdin().is_terminal() {
+        tracing::info!("Spawning stdin source");
         return spawn_stdin_reader(tx);
     }
 
-    // Fallback: mock generator
+    tracing::info!("Spawning mock demo source");
     spawn_mock(tx)
 }
 

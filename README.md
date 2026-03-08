@@ -115,6 +115,7 @@ tail -f /var/log/app.log | smartlog
 | `w` | Toggle line wrapping on/off |
 | `l` | Cycle log level filter (ALL → ERROR → WARN → INFO → DEBUG → ALL) |
 | `r` | Toggle regex filtering mode |
+| `e` | Export filtered logs to file |
 | Mouse wheel | Scroll up/down |
 | `q` | Quit application |
 
@@ -134,6 +135,14 @@ Press `r` to toggle regex mode. When active, the filter input is treated as a re
 ### Log Level Filtering
 
 Press `l` to cycle through minimum log level filters: ALL → ERROR → WARN → INFO → DEBUG → ALL. Only entries at or above the selected severity are shown. This filter combines with the text/regex filter (both must match).
+
+### Export Logs
+
+Press `e` to export the currently filtered logs to a file. The file is saved as `smartlog_export_<timestamp>.log` in the current directory (or the directory specified by `--export-dir`). The status bar shows confirmation with the file path.
+
+### Debug Logging
+
+Use `--verbose` (or `-v`) to enable debug logging. Diagnostic output is written to `smartlog_debug.log` in the current directory. This is useful for troubleshooting SmartLog itself.
 
 ## 📊 Log Format Support
 

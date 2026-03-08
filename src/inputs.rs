@@ -15,7 +15,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 /// **Normal mode**: `q` quits, `/` enters editing, `k`/`j` or arrows scroll,
 /// `PageUp`/`PageDown` scroll by page, `Home`/`g` jump to top, `End`/`G` jump to bottom,
 /// `Esc` clears search, `w` toggles line wrap, `l` cycles log level filter,
-/// `r` toggles regex mode
+/// `r` toggles regex mode, `e` exports filtered logs
 ///
 /// **Editing mode**: `Enter` applies filter, `Esc` cancels and clears filter,
 /// characters are added to input buffer
@@ -23,6 +23,9 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
     if key.kind != KeyEventKind::Press {
         return;
     }
+
+    // Clear transient export feedback on any key press
+    app.clear_export_message();
 
     match app.input_mode {
         InputMode::Normal => match key.code {
@@ -45,6 +48,7 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
                 app.use_regex = !app.use_regex;
                 app.clamp_scroll();
             }
+            KeyCode::Char('e') => app.export_logs(),
             KeyCode::Esc => {
                 app.input_buffer.clear();
                 app.clamp_scroll();
@@ -399,5 +403,42 @@ mod tests {
         // Toggle regex on -> invalid regex -> 0 matches -> scroll clamps
         handle_key_event(&mut app, key(KeyCode::Char('r')));
         assert_eq!(app.scroll, 0);
+    }
+
+    // --- Export key binding tests ---
+
+    #[test]
+    fn test_e_triggers_export() {
+        let dir = std::env::temp_dir().join("smartlog_test_e_key");
+        let _ = std::fs::create_dir_all(&dir);
+        let mut app = app_with_logs(3);
+        app.export_dir = dir.clone();
+
+        handle_key_event(&mut app, key(KeyCode::Char('e')));
+        assert!(app.last_export_message.is_some());
+        assert!(app
+            .last_export_message
+            .as_ref()
+            .unwrap()
+            .contains("Exported 3 logs"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_key_press_clears_export_message() {
+        let mut app = App::new();
+        app.last_export_message = Some("previous export".to_string());
+        handle_key_event(&mut app, key(KeyCode::Char('j')));
+        assert!(app.last_export_message.is_none());
+    }
+
+    #[test]
+    fn test_editing_key_clears_export_message() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Editing;
+        app.last_export_message = Some("previous export".to_string());
+        handle_key_event(&mut app, key(KeyCode::Char('a')));
+        assert!(app.last_export_message.is_none());
     }
 }
