@@ -142,39 +142,41 @@ async fn read_new_lines(
 /// exceeds the limit, the remainder is drained byte-by-byte until `\n` or EOF.
 /// Returns the number of bytes consumed (including the newline), or `0` at EOF.
 /// Invalid UTF-8 sequences are replaced with the Unicode replacement character.
-/// Drains bytes from the reader until a newline (`\n`) or EOF is reached.
+/// Drains bytes until a newline (`\n`) or EOF is reached.
 ///
-/// Used after detecting that a line exceeded `MAX_LOG_LINE_SIZE` to skip
-/// the remainder without allocating memory for it. Reads in chunks via
-/// `fill_buf`/`consume` for efficiency.
+/// Discards all bytes without allocating. Used to skip the remainder of an
+/// oversized line after the retained portion has been collected. Reads in
+/// chunks via `fill_buf`/`consume` for efficiency.
 async fn drain_until_newline<R: tokio::io::AsyncRead + Unpin>(
     reader: &mut BufReader<R>,
 ) -> std::io::Result<()> {
     loop {
-        let buf = reader.fill_buf().await?;
-        if buf.is_empty() {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
             return Ok(()); // EOF
         }
-        if let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+        if let Some(pos) = available.iter().position(|&b| b == b'\n') {
             reader.consume(pos + 1);
             return Ok(());
         }
-        let len = buf.len();
+        let len = available.len();
         reader.consume(len);
     }
 }
 
 /// Reads a single line with bounded retained length.
 ///
-/// Collects up to `MAX_LOG_LINE_SIZE` bytes into `buf`. If the line exceeds
-/// the limit, the remainder is drained without allocation. Returns `0` at
-/// EOF. Strips trailing `\r\n` / `\n`. Reuses the caller-provided buffer.
+/// Collects up to `MAX_LOG_LINE_SIZE` raw bytes, then drains any remainder
+/// of the line without allocation. Decodes to UTF-8 once at the end
+/// (invalid sequences become the replacement character). Returns `0` at EOF.
+/// Strips trailing `\r\n` / `\n`. Reuses the caller-provided buffer.
 async fn read_line_bounded<R: tokio::io::AsyncRead + Unpin>(
     reader: &mut BufReader<R>,
     buf: &mut String,
 ) -> std::io::Result<usize> {
     buf.clear();
     let limit = MAX_LOG_LINE_SIZE;
+    let mut raw = Vec::with_capacity(limit.min(1024));
     let mut total_consumed: usize = 0;
     let mut found_newline = false;
 
@@ -183,14 +185,14 @@ async fn read_line_bounded<R: tokio::io::AsyncRead + Unpin>(
         if available.is_empty() {
             break; // EOF
         }
+
         let newline_pos = available.iter().position(|&b| b == b'\n');
         let chunk_end = newline_pos.unwrap_or(available.len());
-        let remaining_capacity = limit.saturating_sub(buf.len());
-        let to_copy = chunk_end.min(remaining_capacity);
+        let remaining = limit.saturating_sub(raw.len());
+        let to_keep = chunk_end.min(remaining);
 
-        if to_copy > 0 {
-            let slice = &available[..to_copy];
-            buf.push_str(&String::from_utf8_lossy(slice));
+        if to_keep > 0 {
+            raw.extend_from_slice(&available[..to_keep]);
         }
 
         let consume_len = if newline_pos.is_some() {
@@ -205,17 +207,21 @@ async fn read_line_bounded<R: tokio::io::AsyncRead + Unpin>(
             found_newline = true;
             break;
         }
+        if raw.len() >= limit {
+            break;
+        }
     }
 
-    // If we hit the limit without finding a newline, drain the rest of the line
-    if buf.len() >= limit && !found_newline {
+    if !found_newline && raw.len() >= limit {
         drain_until_newline(reader).await?;
     }
 
     // Strip trailing \r for Windows-style line endings
-    if buf.ends_with('\r') {
-        buf.pop();
+    if raw.last() == Some(&b'\r') {
+        raw.pop();
     }
+
+    buf.push_str(&String::from_utf8_lossy(&raw));
 
     Ok(total_consumed)
 }
