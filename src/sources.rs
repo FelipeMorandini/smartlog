@@ -136,30 +136,27 @@ async fn read_new_lines(
     }
 }
 
-/// Reads a single line from the reader with a bounded allocation.
-///
-/// Reads up to `MAX_LOG_LINE_SIZE + 1` bytes (to detect overflow). If the line
-/// exceeds the limit, the remainder is drained byte-by-byte until `\n` or EOF.
-/// Returns the number of bytes consumed (including the newline), or `0` at EOF.
-/// Invalid UTF-8 sequences are replaced with the Unicode replacement character.
 /// Drains bytes until a newline (`\n`) or EOF is reached.
 ///
 /// Discards all bytes without allocating. Used to skip the remainder of an
 /// oversized line after the retained portion has been collected. Reads in
-/// chunks via `fill_buf`/`consume` for efficiency.
+/// chunks via `fill_buf`/`consume` for efficiency. Returns the number of
+/// bytes consumed during the drain (including the newline, if found).
 async fn drain_until_newline<R: tokio::io::AsyncRead + Unpin>(
     reader: &mut BufReader<R>,
-) -> std::io::Result<()> {
+) -> std::io::Result<usize> {
+    let mut drained: usize = 0;
     loop {
         let available = reader.fill_buf().await?;
         if available.is_empty() {
-            return Ok(()); // EOF
+            return Ok(drained); // EOF
         }
         if let Some(pos) = available.iter().position(|&b| b == b'\n') {
             reader.consume(pos + 1);
-            return Ok(());
+            return Ok(drained + pos + 1);
         }
         let len = available.len();
+        drained += len;
         reader.consume(len);
     }
 }
@@ -213,7 +210,7 @@ async fn read_line_bounded<R: tokio::io::AsyncRead + Unpin>(
     }
 
     if !found_newline && raw.len() >= limit {
-        drain_until_newline(reader).await?;
+        total_consumed += drain_until_newline(reader).await?;
     }
 
     // Strip trailing \r for Windows-style line endings
@@ -362,8 +359,8 @@ mod tests {
         let mut reader = TokioBufReader::new(data.as_bytes());
         let mut buf = String::new();
         let _ = read_line_bounded(&mut reader, &mut buf).await.unwrap();
-        // Buffer should be capped at MAX_LOG_LINE_SIZE + 1
-        assert!(buf.len() <= MAX_LOG_LINE_SIZE + 1);
+        // Buffer should be capped at MAX_LOG_LINE_SIZE
+        assert!(buf.len() <= MAX_LOG_LINE_SIZE);
     }
 
     #[tokio::test]
@@ -374,7 +371,7 @@ mod tests {
         let mut buf = String::new();
         // First line: oversized, should be drained
         let _ = read_line_bounded(&mut reader, &mut buf).await.unwrap();
-        assert!(buf.len() <= MAX_LOG_LINE_SIZE + 1);
+        assert!(buf.len() <= MAX_LOG_LINE_SIZE);
         // Second line: should read cleanly
         let _ = read_line_bounded(&mut reader, &mut buf).await.unwrap();
         assert_eq!(buf, "next line");
