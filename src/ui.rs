@@ -89,10 +89,10 @@ fn build_status_title(app: &App, shown: usize, total: usize) -> String {
     } else {
         ""
     };
-    if app.input_buffer.is_empty() {
+    if shown == total {
         format!(" / filter | {status} | {wrap} | {level} | {total} logs{regex} ")
     } else {
-        format!(" / filter | {status} | {wrap} | {level} | {shown}/{total} matches{regex} ")
+        format!(" / filter | {status} | {wrap} | {level} | {shown}/{total} logs{regex} ")
     }
 }
 
