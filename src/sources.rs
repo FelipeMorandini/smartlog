@@ -41,6 +41,7 @@ fn spawn_tail_file(path: PathBuf, tx: mpsc::Sender<String>) -> JoinHandle<()> {
         let mut offset: u64 = wait_for_file(&path, &tx).await;
         let mut reader: Option<BufReader<fs::File>> = None;
         let mut buf = String::new();
+        let mut raw = Vec::new();
 
         loop {
             match fs::metadata(&path).await {
@@ -59,7 +60,7 @@ fn spawn_tail_file(path: PathBuf, tx: mpsc::Sender<String>) -> JoinHandle<()> {
                             reader = open_and_seek(&path, offset).await;
                         }
                         if let Some(ref mut r) = reader {
-                            if read_new_lines(r, &tx, &mut buf).await.is_err() {
+                            if read_new_lines(r, &tx, &mut buf, &mut raw).await.is_err() {
                                 return; // Receiver dropped
                             }
                             offset = r.stream_position().await.unwrap_or(len);
@@ -118,9 +119,10 @@ async fn read_new_lines(
     reader: &mut BufReader<fs::File>,
     tx: &mpsc::Sender<String>,
     buf: &mut String,
+    raw: &mut Vec<u8>,
 ) -> Result<(), ()> {
     loop {
-        match read_line_bounded(reader, buf).await {
+        match read_line_bounded(reader, buf, raw).await {
             Ok(0) => return Ok(()), // EOF reached
             Ok(_) => {
                 truncate_line(buf);
@@ -161,19 +163,28 @@ async fn drain_until_newline<R: tokio::io::AsyncRead + Unpin>(
     }
 }
 
-/// Reads a single line with bounded retained length.
+/// Reads a single line while bounding the retained *raw byte* prefix.
 ///
-/// Collects up to `MAX_LOG_LINE_SIZE` raw bytes, then drains any remainder
-/// of the line without allocation. Decodes to UTF-8 once at the end
-/// (invalid sequences become the replacement character). Returns `0` at EOF.
-/// Strips trailing `\r\n` / `\n`. Reuses the caller-provided buffer.
+/// Collects up to `MAX_LOG_LINE_SIZE` raw bytes into the caller-provided
+/// `raw` buffer, then drains any remainder of the line without allocation.
+/// Decodes to UTF-8 once at the end (invalid sequences become the
+/// replacement character via `String::from_utf8_lossy`). Returns `0` at EOF.
+/// Strips trailing `\r\n` / `\n`. Reuses the caller-provided `buf` and `raw`
+/// buffers to avoid per-line heap allocations on the hot path.
+///
+/// Note: because `from_utf8_lossy` may expand invalid byte sequences into
+/// the U+FFFD replacement character (up to 3 bytes in UTF-8), the resulting
+/// `buf` may temporarily exceed `MAX_LOG_LINE_SIZE` bytes even though the
+/// raw byte prefix is bounded. Callers that require a strict byte limit on
+/// the final retained line must apply `truncate_line` after calling this.
 async fn read_line_bounded<R: tokio::io::AsyncRead + Unpin>(
     reader: &mut BufReader<R>,
     buf: &mut String,
+    raw: &mut Vec<u8>,
 ) -> std::io::Result<usize> {
     buf.clear();
+    raw.clear();
     let limit = MAX_LOG_LINE_SIZE;
-    let mut raw = Vec::with_capacity(limit.min(1024));
     let mut total_consumed: usize = 0;
     let mut found_newline = false;
 
@@ -218,7 +229,7 @@ async fn read_line_bounded<R: tokio::io::AsyncRead + Unpin>(
         raw.pop();
     }
 
-    buf.push_str(&String::from_utf8_lossy(&raw));
+    buf.push_str(&String::from_utf8_lossy(raw));
 
     Ok(total_consumed)
 }
@@ -258,9 +269,10 @@ fn spawn_stdin_reader(tx: mpsc::Sender<String>) -> JoinHandle<()> {
         let stdin = tokio::io::stdin();
         let mut reader = BufReader::new(stdin);
         let mut buf = String::new();
+        let mut raw = Vec::new();
 
         loop {
-            match read_line_bounded(&mut reader, &mut buf).await {
+            match read_line_bounded(&mut reader, &mut buf, &mut raw).await {
                 Ok(0) => {
                     let _ = tx.send("ℹ️  End of input stream reached".to_string()).await;
                     return;
@@ -318,7 +330,10 @@ mod tests {
         let data = b"hello world\n";
         let mut reader = TokioBufReader::new(&data[..]);
         let mut buf = String::new();
-        let n = read_line_bounded(&mut reader, &mut buf).await.unwrap();
+        let mut raw = Vec::new();
+        let n = read_line_bounded(&mut reader, &mut buf, &mut raw)
+            .await
+            .unwrap();
         assert_eq!(buf, "hello world");
         assert_eq!(n, 12); // 11 chars + newline
     }
@@ -328,7 +343,10 @@ mod tests {
         let data = b"no newline";
         let mut reader = TokioBufReader::new(&data[..]);
         let mut buf = String::new();
-        let n = read_line_bounded(&mut reader, &mut buf).await.unwrap();
+        let mut raw = Vec::new();
+        let n = read_line_bounded(&mut reader, &mut buf, &mut raw)
+            .await
+            .unwrap();
         assert_eq!(buf, "no newline");
         assert_eq!(n, 10);
     }
@@ -338,7 +356,10 @@ mod tests {
         let data = b"";
         let mut reader = TokioBufReader::new(&data[..]);
         let mut buf = String::new();
-        let n = read_line_bounded(&mut reader, &mut buf).await.unwrap();
+        let mut raw = Vec::new();
+        let n = read_line_bounded(&mut reader, &mut buf, &mut raw)
+            .await
+            .unwrap();
         assert_eq!(n, 0);
         assert!(buf.is_empty());
     }
@@ -348,7 +369,10 @@ mod tests {
         let data = b"windows line\r\n";
         let mut reader = TokioBufReader::new(&data[..]);
         let mut buf = String::new();
-        let _ = read_line_bounded(&mut reader, &mut buf).await.unwrap();
+        let mut raw = Vec::new();
+        let _ = read_line_bounded(&mut reader, &mut buf, &mut raw)
+            .await
+            .unwrap();
         assert_eq!(buf, "windows line");
     }
 
@@ -358,7 +382,10 @@ mod tests {
         let data = format!("{}\n", oversized);
         let mut reader = TokioBufReader::new(data.as_bytes());
         let mut buf = String::new();
-        let _ = read_line_bounded(&mut reader, &mut buf).await.unwrap();
+        let mut raw = Vec::new();
+        let _ = read_line_bounded(&mut reader, &mut buf, &mut raw)
+            .await
+            .unwrap();
         // Buffer should be capped at MAX_LOG_LINE_SIZE
         assert!(buf.len() <= MAX_LOG_LINE_SIZE);
     }
@@ -369,11 +396,16 @@ mod tests {
         let data = format!("{}\nnext line\n", oversized);
         let mut reader = TokioBufReader::new(data.as_bytes());
         let mut buf = String::new();
+        let mut raw = Vec::new();
         // First line: oversized, should be drained
-        let _ = read_line_bounded(&mut reader, &mut buf).await.unwrap();
+        let _ = read_line_bounded(&mut reader, &mut buf, &mut raw)
+            .await
+            .unwrap();
         assert!(buf.len() <= MAX_LOG_LINE_SIZE);
         // Second line: should read cleanly
-        let _ = read_line_bounded(&mut reader, &mut buf).await.unwrap();
+        let _ = read_line_bounded(&mut reader, &mut buf, &mut raw)
+            .await
+            .unwrap();
         assert_eq!(buf, "next line");
     }
 
@@ -382,11 +414,18 @@ mod tests {
         let data = b"line1\nline2\nline3\n";
         let mut reader = TokioBufReader::new(&data[..]);
         let mut buf = String::new();
-        let _ = read_line_bounded(&mut reader, &mut buf).await.unwrap();
+        let mut raw = Vec::new();
+        let _ = read_line_bounded(&mut reader, &mut buf, &mut raw)
+            .await
+            .unwrap();
         assert_eq!(buf, "line1");
-        let _ = read_line_bounded(&mut reader, &mut buf).await.unwrap();
+        let _ = read_line_bounded(&mut reader, &mut buf, &mut raw)
+            .await
+            .unwrap();
         assert_eq!(buf, "line2");
-        let _ = read_line_bounded(&mut reader, &mut buf).await.unwrap();
+        let _ = read_line_bounded(&mut reader, &mut buf, &mut raw)
+            .await
+            .unwrap();
         assert_eq!(buf, "line3");
     }
 
