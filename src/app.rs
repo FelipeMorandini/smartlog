@@ -2,8 +2,11 @@
 
 use crate::config::MAX_LOG_BUFFER_SIZE;
 use crate::parser::{LogEntry, LogLevel};
+use chrono::Local;
 use regex::Regex;
 use std::collections::VecDeque;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Internal text matching strategy.
 enum TextMatcher {
@@ -50,6 +53,12 @@ pub struct App {
     pub min_log_level: Option<LogLevel>,
     /// Whether to use regex for text filtering
     pub use_regex: bool,
+    /// Label describing the log source (e.g., "file: app.log", "stdin", "demo")
+    pub source_label: String,
+    /// Directory for exported log files
+    pub export_dir: PathBuf,
+    /// Transient feedback message from the last export operation
+    pub last_export_message: Option<String>,
 }
 
 impl Default for App {
@@ -73,6 +82,9 @@ impl App {
             line_wrap: true,
             min_log_level: None,
             use_regex: false,
+            source_label: String::new(),
+            export_dir: PathBuf::from("."),
+            last_export_message: None,
         }
     }
 
@@ -162,6 +174,49 @@ impl App {
         };
     }
 
+    /// Exports currently filtered logs to a timestamped file in the export directory.
+    ///
+    /// Sets `last_export_message` with the result (success path or error).
+    pub fn export_logs(&mut self) {
+        static EXPORT_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+        let filtered = self.get_filtered_logs();
+        let timestamp = Local::now().format("%Y%m%dT%H%M%S%.3f");
+        let seq = EXPORT_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let filename = format!("smartlog_export_{}_{}.log", timestamp, seq);
+        let path = self.export_dir.join(&filename);
+
+        let content: String = if filtered.is_empty() {
+            "# No log entries matched the current filter.\n".to_string()
+        } else {
+            filtered
+                .iter()
+                .map(|e| e.pretty.as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        let count = filtered.len();
+        let label = if count == 1 { "log" } else { "logs" };
+
+        match std::fs::write(&path, &content) {
+            Ok(()) => {
+                tracing::debug!(path = %path.display(), count, "Exported logs");
+                self.last_export_message =
+                    Some(format!("Exported {count} {label} → {}", path.display()));
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Export failed");
+                self.last_export_message = Some(format!("Export failed: {}", e));
+            }
+        }
+    }
+
+    /// Clears the transient export feedback message.
+    pub fn clear_export_message(&mut self) {
+        self.last_export_message = None;
+    }
+
     /// Returns true if the compiled regex (when in regex mode) is invalid.
     pub fn is_regex_invalid(&self) -> bool {
         if !self.use_regex || self.input_buffer.is_empty() {
@@ -229,6 +284,9 @@ mod tests {
         assert!(app.line_wrap);
         assert!(app.min_log_level.is_none());
         assert!(!app.use_regex);
+        assert!(app.source_label.is_empty());
+        assert_eq!(app.export_dir, PathBuf::from("."));
+        assert!(app.last_export_message.is_none());
     }
 
     #[test]
@@ -590,5 +648,120 @@ mod tests {
         app.min_log_level = Some(LogLevel::Warn);
         // error + warn match level, all 3 match regex, but info is filtered by level
         assert_eq!(app.get_filtered_count(), 2);
+    }
+
+    // --- Export and source label tests ---
+
+    /// Creates a unique temporary directory for test isolation.
+    fn unique_temp_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "smartlog_test_{}_{}_{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    #[test]
+    fn test_clear_export_message() {
+        let mut app = App::new();
+        app.last_export_message = Some("test".to_string());
+        app.clear_export_message();
+        assert!(app.last_export_message.is_none());
+    }
+
+    #[test]
+    fn test_clear_export_message_when_already_none() {
+        let mut app = App::new();
+        app.clear_export_message();
+        assert!(app.last_export_message.is_none());
+    }
+
+    #[test]
+    fn test_export_logs_creates_file() {
+        let dir = unique_temp_dir("export");
+        let mut app = App::new();
+        app.export_dir = dir.clone();
+        app.on_log(make_entry("line one", LogLevel::Info));
+        app.on_log(make_entry("line two", LogLevel::Warn));
+
+        app.export_logs();
+
+        assert!(app.last_export_message.is_some());
+        let msg = app.last_export_message.as_ref().unwrap();
+        assert!(msg.contains("Exported 2 logs"));
+
+        // Verify file exists and has content
+        let files: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("smartlog_export_")
+            })
+            .collect();
+        assert_eq!(files.len(), 1);
+        let content = std::fs::read_to_string(files[0].path()).unwrap();
+        assert!(content.contains("line one"));
+        assert!(content.contains("line two"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_export_logs_with_filter() {
+        let dir = unique_temp_dir("export_filter");
+        let mut app = App::new();
+        app.export_dir = dir.clone();
+        app.on_log(make_entry("keep this", LogLevel::Info));
+        app.on_log(make_entry("drop this", LogLevel::Info));
+        app.input_buffer = "keep".to_string();
+
+        app.export_logs();
+
+        let msg = app.last_export_message.as_ref().unwrap();
+        assert!(msg.contains("Exported 1 log"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_export_logs_empty_results() {
+        let dir = unique_temp_dir("export_empty");
+        let mut app = App::new();
+        app.export_dir = dir.clone();
+        app.input_buffer = "nomatch".to_string();
+
+        app.export_logs();
+
+        let msg = app.last_export_message.as_ref().unwrap();
+        assert!(msg.contains("Exported 0 logs"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_export_logs_invalid_dir() {
+        // Use a regular file as the "directory" — guaranteed to fail on all platforms
+        let file_path =
+            std::env::temp_dir().join(format!("smartlog_test_not_a_dir_{}", std::process::id()));
+        std::fs::write(&file_path, b"not a directory").unwrap();
+
+        let mut app = App::new();
+        app.export_dir = file_path.clone();
+        app.on_log(make_entry("test", LogLevel::Info));
+
+        app.export_logs();
+
+        let msg = app.last_export_message.as_ref().unwrap();
+        assert!(msg.contains("Export failed"));
+
+        let _ = std::fs::remove_file(&file_path);
     }
 }

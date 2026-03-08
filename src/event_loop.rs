@@ -55,11 +55,27 @@ const MAX_CONSECUTIVE_EVENT_ERRORS: u32 = 50;
 fn handle_log_message(app: &mut App, maybe_line: Option<String>) -> bool {
     match maybe_line {
         Some(line) => {
+            tracing::trace!(len = line.len(), "Log line received");
             let entry = parse_log(line);
             app.on_log(entry);
             true
         }
-        None => false,
+        None => {
+            tracing::debug!("Log channel closed");
+            false
+        }
+    }
+}
+
+/// Returns a display-safe representation of a key code for tracing.
+///
+/// Character keys are redacted to `Char(*)` to avoid logging sensitive
+/// user input (e.g., filter queries) into debug log files.
+fn redact_key(code: crossterm::event::KeyCode) -> String {
+    use crossterm::event::KeyCode;
+    match code {
+        KeyCode::Char(_) => "Char(*)".to_string(),
+        other => format!("{:?}", other),
     }
 }
 
@@ -74,6 +90,7 @@ fn handle_terminal_event(
 ) -> u32 {
     match maybe_event {
         Some(Ok(Event::Key(key))) => {
+            tracing::trace!(code = %redact_key(key.code), "Key event");
             handle_key_event(app, key);
             0
         }
@@ -137,6 +154,7 @@ pub async fn run<B: Backend>(
                 consecutive_event_errors = handle_terminal_event(app, maybe_event, consecutive_event_errors);
             }
             _ = &mut shutdown_fut => {
+                tracing::info!("Shutdown signal received");
                 app.should_quit = true;
             }
         }

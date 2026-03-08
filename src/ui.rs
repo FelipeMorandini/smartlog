@@ -69,7 +69,16 @@ fn compute_auto_scroll_entry(
 }
 
 /// Builds the status bar title string for the input bar.
+///
+/// When an export feedback message is present, it overrides the normal status
+/// display. Otherwise shows scroll state, wrap, level, log count, regex mode,
+/// and source label.
 fn build_status_title(app: &App, shown: usize, total: usize) -> String {
+    // Export feedback takes priority over normal status
+    if let Some(ref msg) = app.last_export_message {
+        return format!(" {msg} ");
+    }
+
     let status = if app.auto_scroll {
         "FOLLOWING"
     } else {
@@ -89,10 +98,16 @@ fn build_status_title(app: &App, shown: usize, total: usize) -> String {
     } else {
         ""
     };
-    if shown == total {
-        format!(" / filter | {status} | {wrap} | {level} | {total} logs{regex} ")
+    let source = if app.source_label.is_empty() {
+        String::new()
     } else {
-        format!(" / filter | {status} | {wrap} | {level} | {shown}/{total} logs{regex} ")
+        format!(" | {}", app.source_label)
+    };
+
+    if shown == total {
+        format!(" / filter | {status} | {wrap} | {level} | {total} logs{regex}{source} ")
+    } else {
+        format!(" / filter | {status} | {wrap} | {level} | {shown}/{total} logs{regex}{source} ")
     }
 }
 
@@ -314,5 +329,50 @@ mod tests {
         let entries: Vec<&LogEntry> = vec![&e1, &e2];
         // 3 + 1 = 4 raw lines, viewport 3 -> start from index 1
         assert_eq!(compute_auto_scroll_entry(&entries, 3, 80, false), 1);
+    }
+
+    // --- build_status_title tests ---
+
+    #[test]
+    fn test_status_title_default() {
+        let app = App::new();
+        let title = build_status_title(&app, 0, 0);
+        assert!(title.contains("FOLLOWING"));
+        assert!(title.contains("WRAP"));
+        assert!(title.contains("ALL"));
+        assert!(title.contains("0 logs"));
+    }
+
+    #[test]
+    fn test_status_title_with_source_label() {
+        let mut app = App::new();
+        app.source_label = "file: app.log".to_string();
+        let title = build_status_title(&app, 5, 5);
+        assert!(title.contains("file: app.log"));
+    }
+
+    #[test]
+    fn test_status_title_empty_source_label_omitted() {
+        let app = App::new();
+        let title = build_status_title(&app, 0, 0);
+        // Should not contain a trailing " | " with nothing after it
+        assert!(!title.contains("| |"));
+    }
+
+    #[test]
+    fn test_status_title_filtered_count() {
+        let app = App::new();
+        let title = build_status_title(&app, 3, 10);
+        assert!(title.contains("3/10 logs"));
+    }
+
+    #[test]
+    fn test_status_title_export_message_overrides() {
+        let mut app = App::new();
+        app.last_export_message = Some("Exported 5 logs → test.log".to_string());
+        let title = build_status_title(&app, 5, 10);
+        assert!(title.contains("Exported 5 logs"));
+        // Normal status info should not appear when export message is shown
+        assert!(!title.contains("FOLLOWING"));
     }
 }
