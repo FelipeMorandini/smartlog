@@ -14,13 +14,14 @@ pub const MAX_LOG_BUFFER_SIZE: usize = 2000;
 /// producer (file/stdin reader) and consumer (UI) before backpressure occurs.
 pub const CHANNEL_BUFFER_SIZE: usize = 100;
 
-/// Maximum retained size of a single log line in bytes.
+/// Maximum retained length of a single log line in bytes.
 ///
-/// Lines exceeding this limit are truncated *after* being read to prevent
-/// long-term buffer bloat from unusually large log entries (e.g., multi-MB
-/// JSON blobs). This caps the stored line length and steady-state memory
-/// usage, but does not limit the peak allocation performed by the underlying
-/// `read_line` call.
+/// The bounded reader collects at most this many raw bytes into its per-line
+/// buffer. Any remaining bytes beyond this limit are drained without further
+/// growth of that buffer, and lines exceeding this limit are truncated with a
+/// suffix for display. This constant therefore bounds the retained raw bytes
+/// per line; overall peak memory for log reading also includes the
+/// `BufReader`'s internal buffer and any temporary UTF-8 decoding overhead.
 pub const MAX_LOG_LINE_SIZE: usize = 65_536; // 64 KB
 
 /// Polling interval for file changes in milliseconds.
