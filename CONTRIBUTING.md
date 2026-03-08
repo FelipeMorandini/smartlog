@@ -6,7 +6,7 @@ Thank you for your interest in contributing to SmartLog! This document provides 
 
 ### Prerequisites
 
-- Rust 1.70 or later
+- Latest stable Rust (see [rustup.rs](https://rustup.rs/))
 - Git
 
 ### Setting Up Development Environment

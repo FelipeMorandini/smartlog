@@ -86,7 +86,7 @@ SmartLog follows a producer-consumer pattern with async I/O:
 
 **Key Design Decisions**:
 - **Signal Handling**: Unix systems handle both SIGINT and SIGTERM
-- **Polling Interval**: 100ms for keyboard input (balance responsiveness vs CPU)
+- **Event-Driven Input**: Uses crossterm `EventStream` (async, no polling)
 - **Graceful Shutdown**: Sets `should_quit` flag rather than panic
 - **Channel Closure**: Exits gracefully when producer ends (stdin EOF)
 
@@ -164,8 +164,7 @@ SmartLog follows a producer-consumer pattern with async I/O:
 - **Wrapping**: Preserves JSON indentation
 
 **Rendering Performance**:
-- Ratatui diffs the UI and only updates changed cells
-- 60+ FPS even on large log buffers
+- Redraws on every event; ratatui diffs and only updates changed cells
 
 ### `inputs.rs`
 
@@ -203,7 +202,6 @@ SmartLog follows a producer-consumer pattern with async I/O:
 - `MAX_LOG_BUFFER_SIZE`: 2000 entries
 - `CHANNEL_BUFFER_SIZE`: 100 messages
 - `FILE_POLL_INTERVAL_MS`: 500ms
-- `UI_POLL_INTERVAL_MS`: 100ms
 
 **Benefits**:
 - Single source of truth
@@ -241,9 +239,7 @@ ui::ui()
     ↓
 filter logs by input_buffer
     ↓
-style_log() for each entry
-    ↓
-Paragraph::new().scroll()
+entry-based slicing + style_log()
     ↓
 ratatui diff + render
 ```
@@ -265,8 +261,8 @@ ratatui diff + render
 ### Latency
 
 - **Log Ingestion**: <1ms (async, non-blocking)
-- **UI Update**: ~16ms (60 FPS target)
-- **Input Response**: <100ms (polling interval)
+- **UI Update**: Event-driven (redraws on every log or input event)
+- **Input Response**: Near-instant (async event stream, no polling)
 
 ## 🛡️ Error Handling
 
@@ -333,6 +329,6 @@ ratatui diff + render
 
 ---
 
-**Last Updated**: December 2025  
+**Last Updated**: March 2026  
 **Maintainer**: Felipe Pires Morandini
 
