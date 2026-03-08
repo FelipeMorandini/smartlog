@@ -138,7 +138,7 @@ Press `l` to cycle through minimum log level filters: ALL → ERROR → WARN →
 
 ### Export Logs
 
-Press `e` to export the currently filtered logs to a file. The file is saved as `smartlog_export_<timestamp>.log` in the current directory (or the directory specified by `--export-dir`). The status bar shows confirmation with the file path.
+Press `e` to export the currently filtered logs to a file. The file is saved as `smartlog_export_<timestamp>_<seq>.log` in the current directory (or the directory specified by `--export-dir`). The status bar shows confirmation with the file path.
 
 ### Debug Logging
 
