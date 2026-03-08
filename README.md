@@ -28,24 +28,35 @@ Download the latest release for your platform from the [Releases](https://github
 
 **macOS (Apple Silicon):**
 ```bash
-curl -L https://github.com/felipemorandini/smartlog/releases/latest/download/smartlog-macos-silicon -o smartlog
-chmod +x smartlog
+curl -L https://github.com/felipemorandini/smartlog/releases/latest/download/smartlog-aarch64-apple-darwin.tar.gz | tar xz
 sudo mv smartlog /usr/local/bin/
 ```
 
 **macOS (Intel):**
 ```bash
-curl -L https://github.com/felipemorandini/smartlog/releases/latest/download/smartlog-macos-intel -o smartlog
-chmod +x smartlog
+curl -L https://github.com/felipemorandini/smartlog/releases/latest/download/smartlog-x86_64-apple-darwin.tar.gz | tar xz
 sudo mv smartlog /usr/local/bin/
 ```
 
 **Linux (x86_64):**
 ```bash
-curl -L https://github.com/felipemorandini/smartlog/releases/latest/download/smartlog-linux-amd64 -o smartlog
-chmod +x smartlog
+curl -L https://github.com/felipemorandini/smartlog/releases/latest/download/smartlog-x86_64-unknown-linux-musl.tar.gz | tar xz
 sudo mv smartlog /usr/local/bin/
 ```
+
+**Linux (ARM64):**
+```bash
+curl -L https://github.com/felipemorandini/smartlog/releases/latest/download/smartlog-aarch64-unknown-linux-musl.tar.gz | tar xz
+sudo mv smartlog /usr/local/bin/
+```
+
+**Windows (x86_64):**
+
+Download [`smartlog-x86_64-pc-windows-msvc.zip`](https://github.com/felipemorandini/smartlog/releases/latest/download/smartlog-x86_64-pc-windows-msvc.zip), extract, and add `smartlog.exe` to your PATH.
+
+**Windows (ARM64):**
+
+Download [`smartlog-aarch64-pc-windows-msvc.zip`](https://github.com/felipemorandini/smartlog/releases/latest/download/smartlog-aarch64-pc-windows-msvc.zip), extract, and add `smartlog.exe` to your PATH.
 
 ### Using Cargo
 

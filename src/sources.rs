@@ -1,6 +1,6 @@
 //! Async log input sources: stdin, file tailing, and mock generator.
 
-use crate::config::FILE_POLL_INTERVAL_MS;
+use crate::config::{FILE_POLL_INTERVAL_MS, MAX_LOG_LINE_SIZE};
 use std::io::IsTerminal;
 use std::io::SeekFrom;
 use std::path::PathBuf;
@@ -127,6 +127,7 @@ async fn read_new_lines(
                 while buf.ends_with(['\n', '\r']) {
                     buf.pop();
                 }
+                truncate_line(buf);
                 if tx.send(buf.clone()).await.is_err() {
                     return Err(()); // Receiver dropped
                 }
@@ -136,6 +137,20 @@ async fn read_new_lines(
                 return Ok(());
             }
         }
+    }
+}
+
+/// Truncates a line in-place if it exceeds [`MAX_LOG_LINE_SIZE`] bytes.
+///
+/// Truncation respects UTF-8 char boundaries so we never produce invalid strings.
+fn truncate_line(line: &mut String) {
+    if line.len() > MAX_LOG_LINE_SIZE {
+        let mut end = MAX_LOG_LINE_SIZE;
+        while end > 0 && !line.is_char_boundary(end) {
+            end -= 1;
+        }
+        line.truncate(end);
+        line.push_str(" ... [truncated]");
     }
 }
 
@@ -160,6 +175,7 @@ fn spawn_stdin_reader(tx: mpsc::Sender<String>) -> JoinHandle<()> {
                             buf.pop();
                         }
                     }
+                    truncate_line(&mut buf);
                     if tx.send(buf.clone()).await.is_err() {
                         return; // Receiver dropped
                     }
@@ -188,11 +204,57 @@ fn spawn_mock(tx: mpsc::Sender<String>) -> JoinHandle<()> {
 
         loop {
             for log in &logs {
-                if tx.send(log.to_string()).await.is_err() {
+                let mut line = log.to_string();
+                truncate_line(&mut line);
+                if tx.send(line).await.is_err() {
                     return; // Channel closed
                 }
                 tokio::time::sleep(Duration::from_millis(1500)).await;
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_truncate_line_short_unchanged() {
+        let mut line = "short line".to_string();
+        truncate_line(&mut line);
+        assert_eq!(line, "short line");
+    }
+
+    #[test]
+    fn test_truncate_line_exact_limit_unchanged() {
+        let mut line = "a".repeat(MAX_LOG_LINE_SIZE);
+        truncate_line(&mut line);
+        assert_eq!(line.len(), MAX_LOG_LINE_SIZE);
+    }
+
+    #[test]
+    fn test_truncate_line_over_limit() {
+        let mut line = "a".repeat(MAX_LOG_LINE_SIZE + 100);
+        truncate_line(&mut line);
+        assert!(line.ends_with(" ... [truncated]"));
+        assert!(line.len() <= MAX_LOG_LINE_SIZE + " ... [truncated]".len());
+    }
+
+    #[test]
+    fn test_truncate_line_respects_utf8_boundary() {
+        // Multi-byte char: each is 3 bytes in UTF-8
+        let mut line = "\u{4e16}".repeat(MAX_LOG_LINE_SIZE);
+        truncate_line(&mut line);
+        assert!(line.ends_with(" ... [truncated]"));
+        // Must still be valid UTF-8
+        let _ = line.as_str();
+    }
+
+    #[test]
+    fn test_truncate_line_empty() {
+        let mut line = String::new();
+        truncate_line(&mut line);
+        assert!(line.is_empty());
+    }
 }
