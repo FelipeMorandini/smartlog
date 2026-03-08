@@ -179,10 +179,8 @@ fn spawn_stdin_reader(tx: mpsc::Sender<String>) -> JoinHandle<()> {
                     return;
                 }
                 Ok(_) => {
-                    if buf.ends_with('\n') {
-                        while buf.ends_with(['\n', '\r']) {
-                            buf.pop();
-                        }
+                    while buf.ends_with(['\n', '\r']) {
+                        buf.pop();
                     }
                     let was_oversized = buf.len() > MAX_LOG_LINE_SIZE;
                     truncate_line(&mut buf);
@@ -256,8 +254,10 @@ mod tests {
 
     #[test]
     fn test_truncate_line_respects_utf8_boundary() {
-        // Multi-byte char: each is 3 bytes in UTF-8
-        let mut line = "\u{4e16}".repeat(MAX_LOG_LINE_SIZE);
+        // Multi-byte char: each is 3 bytes in UTF-8. Create a string that just
+        // exceeds MAX_LOG_LINE_SIZE bytes to trigger truncation without over-allocating.
+        let repeat_count = MAX_LOG_LINE_SIZE / 3 + 1;
+        let mut line = "\u{4e16}".repeat(repeat_count);
         truncate_line(&mut line);
         assert!(line.ends_with(TRUNCATION_SUFFIX));
         assert!(line.len() <= MAX_LOG_LINE_SIZE);
