@@ -119,10 +119,11 @@ fn handle_terminal_event(
     }
 }
 
-/// Updates the visible height from the current terminal size.
-fn update_visible_height(app: &mut App) {
-    if let Ok(size) = crossterm::terminal::size() {
-        app.visible_height = size.1.saturating_sub(5);
+/// Updates the visible dimensions from the current terminal size.
+fn update_visible_dimensions(app: &mut App) {
+    if let Ok((cols, rows)) = crossterm::terminal::size() {
+        app.visible_height = rows.saturating_sub(5);
+        app.visible_width = cols.saturating_sub(2);
     }
 }
 
@@ -146,7 +147,7 @@ pub async fn run<B: Backend>(
 
     loop {
         terminal.draw(|f| ui(f, app))?;
-        update_visible_height(app);
+        update_visible_dimensions(app);
 
         tokio::select! {
             maybe_msg = rx.recv(), if channel_open => {

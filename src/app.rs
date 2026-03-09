@@ -46,8 +46,10 @@ pub struct App {
     pub should_quit: bool,
     /// Total number of logs processed (for debugging)
     pub logs_processed: u64,
-    /// Visible height of the log area (updated each frame from terminal size)
+    /// Visible height of the log area in lines (updated each frame from terminal size)
     pub visible_height: u16,
+    /// Visible width of the log area in columns (updated each frame from terminal size)
+    pub visible_width: u16,
     /// Whether line wrapping is enabled
     pub line_wrap: bool,
     /// Minimum log level filter (None = show all)
@@ -84,6 +86,7 @@ impl App {
             should_quit: false,
             logs_processed: 0,
             visible_height: 20,
+            visible_width: 80,
             line_wrap: true,
             min_log_level: None,
             use_regex: false,

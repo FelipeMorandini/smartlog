@@ -2,7 +2,62 @@
 
 use crate::app::{App, InputMode};
 use crate::config::MAX_INPUT_BUFFER_SIZE;
+use crate::ui::{compute_raw_lines, compute_visual_lines, metadata_prefix_display_width};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+
+/// Computes how many entries fit in one page scrolling forward from `start`.
+///
+/// Returns 0 when the viewport has no height or there are no entries (no-op).
+fn page_entries_forward(app: &App, filtered: &[&crate::parser::LogEntry], start: usize) -> usize {
+    let height = app.visible_height as usize;
+    if filtered.is_empty() || height == 0 {
+        return 0;
+    }
+    let width = app.visible_width as usize;
+    let mut lines = 0;
+    let mut count = 0;
+    for entry in &filtered[start..] {
+        let entry_lines = if app.line_wrap {
+            let pw = metadata_prefix_display_width(entry, app.show_timestamps);
+            compute_visual_lines(&entry.pretty, width, pw)
+        } else {
+            compute_raw_lines(&entry.pretty)
+        };
+        if lines + entry_lines > height && count > 0 {
+            break;
+        }
+        lines += entry_lines;
+        count += 1;
+    }
+    count.max(1)
+}
+
+/// Computes how many entries fit in one page scrolling backward from `end`.
+///
+/// Returns 0 when the viewport has no height or there are no entries (no-op).
+fn page_entries_backward(app: &App, filtered: &[&crate::parser::LogEntry], end: usize) -> usize {
+    let height = app.visible_height as usize;
+    if filtered.is_empty() || height == 0 {
+        return 0;
+    }
+    let width = app.visible_width as usize;
+    let mut lines = 0;
+    let mut count = 0;
+    for entry in filtered[..=end].iter().rev() {
+        let entry_lines = if app.line_wrap {
+            let pw = metadata_prefix_display_width(entry, app.show_timestamps);
+            compute_visual_lines(&entry.pretty, width, pw)
+        } else {
+            compute_raw_lines(&entry.pretty)
+        };
+        if lines + entry_lines > height && count > 0 {
+            break;
+        }
+        lines += entry_lines;
+        count += 1;
+    }
+    count.max(1)
+}
 
 /// Handles keyboard input events and updates the application state.
 ///
@@ -37,8 +92,18 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
             }
             KeyCode::Up | KeyCode::Char('k') => app.scroll_up(),
             KeyCode::Down | KeyCode::Char('j') => app.scroll_down(),
-            KeyCode::PageUp => app.scroll_up_by(app.visible_height as usize),
-            KeyCode::PageDown => app.scroll_down_by(app.visible_height as usize),
+            KeyCode::PageUp => {
+                let filtered = app.get_filtered_logs();
+                let pos = app.scroll.min(filtered.len().saturating_sub(1));
+                let n = page_entries_backward(app, &filtered, pos);
+                app.scroll_up_by(n);
+            }
+            KeyCode::PageDown => {
+                let filtered = app.get_filtered_logs();
+                let pos = app.scroll.min(filtered.len().saturating_sub(1));
+                let n = page_entries_forward(app, &filtered, pos);
+                app.scroll_down_by(n);
+            }
             KeyCode::Home | KeyCode::Char('g') => app.scroll_to_top(),
             KeyCode::End | KeyCode::Char('G') => app.scroll_to_bottom(),
             KeyCode::Char('w') => app.line_wrap = !app.line_wrap,
@@ -220,7 +285,9 @@ mod tests {
         let mut app = app_with_logs(50);
         app.scroll = 30;
         app.visible_height = 20;
+        app.visible_width = 80;
         handle_key_event(&mut app, key(KeyCode::PageUp));
+        // Single-line entries: 20 entries fit in 20 visual lines
         assert_eq!(app.scroll, 10);
     }
 
@@ -230,8 +297,99 @@ mod tests {
         app.auto_scroll = false;
         app.scroll = 10;
         app.visible_height = 20;
+        app.visible_width = 80;
         handle_key_event(&mut app, key(KeyCode::PageDown));
+        // Single-line entries: 20 entries fit in 20 visual lines
         assert_eq!(app.scroll, 30);
+    }
+
+    #[test]
+    fn test_page_down_multiline_entries() {
+        // Each entry has 2 lines of content ("a\nb"), so at viewport height=4,
+        // only 2 entries fit per page (2 lines * 2 = 4)
+        let mut app = App::new();
+        for i in 0..10 {
+            app.on_log(LogEntry {
+                raw: format!("line{}\nextra", i),
+                pretty: format!("line{}\nextra", i),
+                level: LogLevel::Info,
+                timestamp: None,
+                source: None,
+            });
+        }
+        app.auto_scroll = false;
+        app.scroll = 0;
+        app.visible_height = 4;
+        app.visible_width = 80;
+        handle_key_event(&mut app, key(KeyCode::PageDown));
+        // Should jump 2 entries (not 4)
+        assert_eq!(app.scroll, 2);
+    }
+
+    #[test]
+    fn test_page_up_multiline_entries() {
+        let mut app = App::new();
+        for i in 0..10 {
+            app.on_log(LogEntry {
+                raw: format!("line{}\nextra", i),
+                pretty: format!("line{}\nextra", i),
+                level: LogLevel::Info,
+                timestamp: None,
+                source: None,
+            });
+        }
+        app.scroll = 6;
+        app.visible_height = 4;
+        app.visible_width = 80;
+        handle_key_event(&mut app, key(KeyCode::PageUp));
+        // Should jump back 2 entries (not 4)
+        assert_eq!(app.scroll, 4);
+    }
+
+    #[test]
+    fn test_page_up_empty_filtered_no_panic() {
+        let mut app = App::new();
+        app.input_buffer = "nonexistent".to_string();
+        app.scroll = 0;
+        app.visible_height = 20;
+        app.visible_width = 80;
+        // No logs match the filter — should be a no-op, not a panic
+        handle_key_event(&mut app, key(KeyCode::PageUp));
+        assert_eq!(app.scroll, 0);
+    }
+
+    #[test]
+    fn test_page_down_empty_filtered_no_panic() {
+        let mut app = App::new();
+        app.input_buffer = "nonexistent".to_string();
+        app.auto_scroll = false;
+        app.scroll = 0;
+        app.visible_height = 20;
+        app.visible_width = 80;
+        // No logs match the filter — should be a no-op, not a panic
+        handle_key_event(&mut app, key(KeyCode::PageDown));
+        assert_eq!(app.scroll, 0);
+    }
+
+    #[test]
+    fn test_page_down_zero_height_is_noop() {
+        let mut app = app_with_logs(20);
+        app.auto_scroll = false;
+        app.scroll = 5;
+        app.visible_height = 0;
+        app.visible_width = 80;
+        handle_key_event(&mut app, key(KeyCode::PageDown));
+        assert_eq!(app.scroll, 5);
+    }
+
+    #[test]
+    fn test_page_up_zero_height_is_noop() {
+        let mut app = app_with_logs(20);
+        app.scroll = 5;
+        app.visible_height = 0;
+        app.visible_width = 80;
+        handle_key_event(&mut app, key(KeyCode::PageUp));
+        assert_eq!(app.scroll, 5);
     }
 
     // --- Scroll clamping on filter change tests ---
