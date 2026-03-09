@@ -171,10 +171,12 @@ fn extract_json_timestamp(json: &Value) -> Option<DateTime<Local>> {
 fn plain_text_timestamp_regex() -> Option<&'static Regex> {
     static RE: OnceLock<Option<Regex>> = OnceLock::new();
     RE.get_or_init(|| {
-        // Match hyphen-separated dates with T or space (with optional TZ suffix),
-        // slash-separated dates with space only (no TZ — no chrono format for that combo).
+        // Three branches, each matching only what parse_timestamp_str can handle:
+        // 1. Hyphen + T separator: optional TZ suffix (RFC 3339 style)
+        // 2. Hyphen + space separator: no TZ suffix (naive local time)
+        // 3. Slash + space separator: no TZ suffix (naive local time)
         Regex::new(
-            r"^((?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)|(?:\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?))",
+            r"^((?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)|(?:\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?)|(?:\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?))",
         )
         .ok()
     })
@@ -546,6 +548,14 @@ mod tests {
         // Slash-separated regex branch excludes TZ suffix, so "Z" is not captured.
         // The remaining "2024/06/15 10:30:45" parses as a naive local time.
         let entry = parse_log("2024/06/15 10:30:45Z some log".to_string());
+        assert!(entry.timestamp.is_some());
+    }
+
+    #[test]
+    fn test_parse_plain_text_space_with_tz_stripped() {
+        // Hyphen + space branch excludes TZ suffix, so "Z" is not captured.
+        // The remaining "2024-06-15 10:30:45" parses as a naive local time.
+        let entry = parse_log("2024-06-15 10:30:45Z some log".to_string());
         assert!(entry.timestamp.is_some());
     }
 
