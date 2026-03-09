@@ -11,21 +11,30 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
+use unicode_width::UnicodeWidthStr;
 
 /// Computes the number of visual lines a text occupies when wrapped to a given width.
 ///
-/// Each line of the text is wrapped at `width` characters. Empty lines count as 1.
-fn compute_visual_lines(text: &str, width: usize) -> usize {
+/// Uses `unicode-width` for accurate display width (CJK, wide glyphs).
+/// `prefix_width` is the display width of metadata prepended to the first line
+/// (e.g., timestamp and source labels). Only the first line is affected.
+pub(crate) fn compute_visual_lines(text: &str, width: usize, prefix_width: usize) -> usize {
     if width == 0 {
         return text.lines().count().max(1);
     }
     text.lines()
-        .map(|line| {
-            let len = line.chars().count();
-            if len == 0 {
+        .enumerate()
+        .map(|(i, line)| {
+            let display_w = UnicodeWidthStr::width(line);
+            let total = if i == 0 {
+                display_w + prefix_width
+            } else {
+                display_w
+            };
+            if total == 0 {
                 1
             } else {
-                len.div_ceil(width)
+                total.div_ceil(width)
             }
         })
         .sum::<usize>()
@@ -33,21 +42,40 @@ fn compute_visual_lines(text: &str, width: usize) -> usize {
 }
 
 /// Counts the number of newline-separated lines in the text (no wrapping).
-fn compute_raw_lines(text: &str) -> usize {
+pub(crate) fn compute_raw_lines(text: &str) -> usize {
     text.lines().count().max(1)
+}
+
+/// Computes the display width of metadata prefix spans for a log entry.
+///
+/// This accounts for the `[timestamp] ` and `[source] ` prefixes that
+/// `prepend_metadata` inserts before the log content.
+pub(crate) fn metadata_prefix_display_width(entry: &LogEntry, show_timestamps: bool) -> usize {
+    let mut width = 0;
+    if let Some(ref src) = entry.source {
+        width += UnicodeWidthStr::width(format!("[{src}] ").as_str());
+    }
+    if show_timestamps {
+        if let Some(ts) = entry.timestamp {
+            let relative = format_relative_time(ts);
+            width += UnicodeWidthStr::width(format!("[{relative}] ").as_str());
+        }
+    }
+    width
 }
 
 /// Finds the index of the first entry to display for auto-scroll.
 ///
 /// Iterates entries in reverse, summing visual lines until the viewport is full.
-/// When `line_wrap` is true, uses character-based wrapping; otherwise counts raw lines.
-/// Returns the index of the first entry that should be visible. Always ensures
-/// at least the last entry is shown, even if it exceeds the viewport height.
+/// When `line_wrap` is true, uses unicode-width wrapping with metadata prefix;
+/// otherwise counts raw lines. Returns the index of the first entry that should
+/// be visible. Always ensures at least the last entry is shown.
 fn compute_auto_scroll_entry(
     entries: &[&LogEntry],
     viewport_height: usize,
     viewport_width: usize,
     line_wrap: bool,
+    show_timestamps: bool,
 ) -> usize {
     if entries.is_empty() || viewport_height == 0 {
         return 0;
@@ -57,7 +85,8 @@ fn compute_auto_scroll_entry(
     let mut lines_used = 0usize;
     for (i, entry) in entries.iter().enumerate().rev() {
         let entry_lines = if line_wrap {
-            compute_visual_lines(&entry.pretty, viewport_width)
+            let prefix_w = metadata_prefix_display_width(entry, show_timestamps);
+            compute_visual_lines(&entry.pretty, viewport_width, prefix_w)
         } else {
             compute_raw_lines(&entry.pretty)
         };
@@ -173,6 +202,7 @@ pub fn ui(f: &mut Frame, app: &App) {
             viewport_height,
             viewport_width,
             app.line_wrap,
+            app.show_timestamps,
         )
     } else {
         app.scroll.min(filtered_logs.len().saturating_sub(1))
@@ -238,43 +268,129 @@ mod tests {
 
     #[test]
     fn test_visual_lines_single_short_line() {
-        assert_eq!(compute_visual_lines("hello", 80), 1);
+        assert_eq!(compute_visual_lines("hello", 80, 0), 1);
     }
 
     #[test]
     fn test_visual_lines_exact_width() {
-        assert_eq!(compute_visual_lines("abcde", 5), 1);
+        assert_eq!(compute_visual_lines("abcde", 5, 0), 1);
     }
 
     #[test]
     fn test_visual_lines_wraps_once() {
-        assert_eq!(compute_visual_lines("abcdef", 5), 2);
+        assert_eq!(compute_visual_lines("abcdef", 5, 0), 2);
     }
 
     #[test]
     fn test_visual_lines_multiline_text() {
-        assert_eq!(compute_visual_lines("aaa\nbbb\nccc", 80), 3);
+        assert_eq!(compute_visual_lines("aaa\nbbb\nccc", 80, 0), 3);
     }
 
     #[test]
     fn test_visual_lines_multiline_with_wrapping() {
-        assert_eq!(compute_visual_lines("abcdef\ngh", 5), 3);
+        assert_eq!(compute_visual_lines("abcdef\ngh", 5, 0), 3);
     }
 
     #[test]
     fn test_visual_lines_empty_string() {
-        assert_eq!(compute_visual_lines("", 80), 1);
+        assert_eq!(compute_visual_lines("", 80, 0), 1);
     }
 
     #[test]
     fn test_visual_lines_zero_width() {
-        assert_eq!(compute_visual_lines("abc\ndef", 0), 2);
+        assert_eq!(compute_visual_lines("abc\ndef", 0, 0), 2);
     }
 
     #[test]
     fn test_visual_lines_pretty_json() {
         let json = "{\n  \"level\": \"ERROR\",\n  \"msg\": \"fail\"\n}";
-        assert_eq!(compute_visual_lines(json, 40), 4);
+        assert_eq!(compute_visual_lines(json, 40, 0), 4);
+    }
+
+    // --- TD-4: unicode width tests ---
+
+    #[test]
+    fn test_visual_lines_cjk_double_width() {
+        // Each CJK char is display width 2; 5 chars = 10 display width
+        // At width 10, should fit in 1 line
+        assert_eq!(compute_visual_lines("你好世界呀", 10, 0), 1);
+        // At width 6, 10 display units → ceil(10/6) = 2 lines
+        assert_eq!(compute_visual_lines("你好世界呀", 6, 0), 2);
+    }
+
+    #[test]
+    fn test_visual_lines_mixed_ascii_cjk() {
+        // "hi你好" = 2 + 4 = 6 display width
+        assert_eq!(compute_visual_lines("hi你好", 6, 0), 1);
+        assert_eq!(compute_visual_lines("hi你好", 5, 0), 2);
+    }
+
+    // --- TD-18: prefix width tests ---
+
+    #[test]
+    fn test_visual_lines_with_prefix_causes_wrap() {
+        // "abcde" = 5 chars, width = 5, no prefix → 1 line
+        assert_eq!(compute_visual_lines("abcde", 5, 0), 1);
+        // Same but with prefix_width=3 → first line total = 8 → ceil(8/5) = 2
+        assert_eq!(compute_visual_lines("abcde", 5, 3), 2);
+    }
+
+    #[test]
+    fn test_visual_lines_prefix_only_affects_first_line() {
+        // "abcde\nfgh" at width 5, prefix 3:
+        // first line: 5+3=8 → ceil(8/5) = 2
+        // second line: 3 → 1
+        // total = 3
+        assert_eq!(compute_visual_lines("abcde\nfgh", 5, 3), 3);
+        // Without prefix: first=ceil(5/5)=1, second=1, total=2
+        assert_eq!(compute_visual_lines("abcde\nfgh", 5, 0), 2);
+    }
+
+    #[test]
+    fn test_metadata_prefix_display_width_no_metadata() {
+        let e = entry("test");
+        assert_eq!(metadata_prefix_display_width(&e, false), 0);
+    }
+
+    #[test]
+    fn test_metadata_prefix_display_width_source_only() {
+        let mut e = entry("test");
+        e.source = Some("app.log".to_string());
+        // "[app.log] " = 10 chars
+        assert_eq!(metadata_prefix_display_width(&e, false), 10);
+    }
+
+    #[test]
+    fn test_metadata_prefix_display_width_timestamp_only() {
+        let mut e = entry("test");
+        e.timestamp = Some(chrono::Local::now() - chrono::Duration::seconds(5));
+        // "[5s ago] " = 9 chars (approx, depends on exact formatting)
+        let w = metadata_prefix_display_width(&e, true);
+        assert!(w > 0);
+    }
+
+    #[test]
+    fn test_metadata_prefix_display_width_timestamp_disabled() {
+        let mut e = entry("test");
+        e.timestamp = Some(chrono::Local::now());
+        // show_timestamps=false → timestamp not counted
+        assert_eq!(metadata_prefix_display_width(&e, false), 0);
+    }
+
+    #[test]
+    fn test_auto_scroll_with_metadata_prefix() {
+        // Entry with source metadata — the prefix takes display width
+        let mut e1 = entry("abcdefghij"); // 10 chars
+        e1.source = Some("app.log".to_string()); // adds "[app.log] " = 10 chars
+        let mut e2 = entry("abcdefghij");
+        e2.source = Some("app.log".to_string());
+        let entries: Vec<&LogEntry> = vec![&e1, &e2];
+        // viewport width=20, with prefix each entry is 20 display width → 1 line each
+        // viewport height=2 → both fit
+        assert_eq!(compute_auto_scroll_entry(&entries, 2, 20, true, false), 0);
+        // viewport width=15 → each entry is 20 width → ceil(20/15) = 2 lines each
+        // viewport height=2 → only last entry fits
+        assert_eq!(compute_auto_scroll_entry(&entries, 2, 15, true, false), 1);
     }
 
     // --- compute_raw_lines tests ---
@@ -299,7 +415,7 @@ mod tests {
     #[test]
     fn test_auto_scroll_empty_entries() {
         let entries: Vec<&LogEntry> = vec![];
-        assert_eq!(compute_auto_scroll_entry(&entries, 10, 80, true), 0);
+        assert_eq!(compute_auto_scroll_entry(&entries, 10, 80, true, false), 0);
     }
 
     #[test]
@@ -307,7 +423,7 @@ mod tests {
         let e1 = entry("line1");
         let e2 = entry("line2");
         let entries: Vec<&LogEntry> = vec![&e1, &e2];
-        assert_eq!(compute_auto_scroll_entry(&entries, 10, 80, true), 0);
+        assert_eq!(compute_auto_scroll_entry(&entries, 10, 80, true, false), 0);
     }
 
     #[test]
@@ -317,7 +433,7 @@ mod tests {
         let e3 = entry("line3");
         let e4 = entry("line4");
         let entries: Vec<&LogEntry> = vec![&e1, &e2, &e3, &e4];
-        assert_eq!(compute_auto_scroll_entry(&entries, 2, 80, true), 2);
+        assert_eq!(compute_auto_scroll_entry(&entries, 2, 80, true, false), 2);
     }
 
     #[test]
@@ -327,21 +443,21 @@ mod tests {
         let e2 = entry(json);
         let e3 = entry(json);
         let entries: Vec<&LogEntry> = vec![&e1, &e2, &e3];
-        assert_eq!(compute_auto_scroll_entry(&entries, 5, 80, true), 2);
+        assert_eq!(compute_auto_scroll_entry(&entries, 5, 80, true, false), 2);
     }
 
     #[test]
     fn test_auto_scroll_zero_viewport_height() {
         let e1 = entry("line1");
         let entries: Vec<&LogEntry> = vec![&e1];
-        assert_eq!(compute_auto_scroll_entry(&entries, 0, 80, true), 0);
+        assert_eq!(compute_auto_scroll_entry(&entries, 0, 80, true, false), 0);
     }
 
     #[test]
     fn test_auto_scroll_single_oversized_entry() {
         let big = entry("a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no\np\nq\nr\ns\nt");
         let entries: Vec<&LogEntry> = vec![&big];
-        assert_eq!(compute_auto_scroll_entry(&entries, 3, 80, true), 0);
+        assert_eq!(compute_auto_scroll_entry(&entries, 3, 80, true, false), 0);
     }
 
     #[test]
@@ -350,7 +466,7 @@ mod tests {
         let e2 = entry("short");
         let big = entry("a\nb\nc\nd\ne\nf\ng\nh\ni\nj");
         let entries: Vec<&LogEntry> = vec![&e1, &e2, &big];
-        assert_eq!(compute_auto_scroll_entry(&entries, 3, 80, true), 2);
+        assert_eq!(compute_auto_scroll_entry(&entries, 3, 80, true, false), 2);
     }
 
     // --- no-wrap auto-scroll tests ---
@@ -360,8 +476,8 @@ mod tests {
         let e1 = entry("abcdefghij");
         let e2 = entry("klmnopqrst");
         let entries: Vec<&LogEntry> = vec![&e1, &e2];
-        assert_eq!(compute_auto_scroll_entry(&entries, 2, 5, true), 1);
-        assert_eq!(compute_auto_scroll_entry(&entries, 2, 5, false), 0);
+        assert_eq!(compute_auto_scroll_entry(&entries, 2, 5, true, false), 1);
+        assert_eq!(compute_auto_scroll_entry(&entries, 2, 5, false, false), 0);
     }
 
     #[test]
@@ -369,7 +485,7 @@ mod tests {
         let e1 = entry("a\nb\nc");
         let e2 = entry("d");
         let entries: Vec<&LogEntry> = vec![&e1, &e2];
-        assert_eq!(compute_auto_scroll_entry(&entries, 3, 80, false), 1);
+        assert_eq!(compute_auto_scroll_entry(&entries, 3, 80, false, false), 1);
     }
 
     // --- build_status_title tests ---
