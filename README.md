@@ -155,8 +155,8 @@ Use `--verbose` (or `-v`) to enable debug logging. Diagnostic output is written 
 ### Relative Timestamps
 
 Press `t` to toggle relative timestamp display. When enabled, each log entry with a detected timestamp shows a prefix like `[3s ago]`, `[5m ago]`, or `[2h ago]`. Timestamps are extracted from:
-- **JSON logs**: `timestamp`, `ts`, `time`, `@timestamp`, `datetime` fields (ISO 8601 strings or epoch seconds/milliseconds)
-- **Plain text logs**: ISO 8601 patterns at the beginning of the line (e.g., `2024-01-15T10:30:45Z`, `2024-01-15 10:30:45`)
+- **JSON logs**: `timestamp`, `ts`, `time`, `@timestamp`, `datetime`, `date` fields (ISO 8601 strings or Unix epoch seconds/milliseconds/microseconds)
+- **Plain text logs**: ISO 8601 or common date/time patterns at the beginning of the line, including `YYYY-MM-DD` and `YYYY/MM/DD` formats (e.g., `2024-01-15T10:30:45Z`, `2024-01-15 10:30:45`, `2024/01/15 10:30:45`)
 
 ### Multi-File Tailing
 
