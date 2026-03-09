@@ -80,7 +80,11 @@ fn build_status_suffix(app: &App) -> String {
     } else {
         ""
     };
-    let time = if app.show_timestamps { " | TIME" } else { "" };
+    let time = if app.show_timestamps {
+        " | REL TIME"
+    } else {
+        ""
+    };
     let theme = format!(" | {}", app.theme.name);
     let source = if app.source_label.is_empty() {
         String::new()
@@ -417,14 +421,14 @@ mod tests {
         let mut app = App::new();
         app.show_timestamps = true;
         let title = build_status_title(&app, 0, 0);
-        assert!(title.contains("TIME"));
+        assert!(title.contains("REL TIME"));
     }
 
     #[test]
     fn test_status_title_hides_time_when_disabled() {
         let app = App::new();
         let title = build_status_title(&app, 0, 0);
-        assert!(!title.contains("TIME"));
+        assert!(!title.contains("REL TIME"));
     }
 
     #[test]
@@ -462,7 +466,7 @@ mod tests {
         let mut app = App::new();
         app.show_timestamps = true;
         let mut e = entry("test");
-        e.timestamp = Some(chrono::Local::now());
+        e.timestamp = Some(chrono::Local::now() - chrono::Duration::seconds(1));
         let mut line = Line::from(Span::raw("test"));
         prepend_metadata(&mut line, &e, &app);
         assert_eq!(line.spans.len(), 2);
@@ -474,7 +478,7 @@ mod tests {
         let mut app = App::new();
         app.show_timestamps = true;
         let mut e = entry("test");
-        e.timestamp = Some(chrono::Local::now());
+        e.timestamp = Some(chrono::Local::now() - chrono::Duration::seconds(1));
         e.source = Some("app.log".to_string());
         let mut line = Line::from(Span::raw("test"));
         prepend_metadata(&mut line, &e, &app);
