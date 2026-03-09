@@ -149,15 +149,19 @@ fn parse_epoch(value: f64) -> Option<DateTime<Local>> {
 
 /// Extracts a timestamp from a JSON object by checking common field names.
 fn extract_json_timestamp(json: &Value) -> Option<DateTime<Local>> {
-    let ts_value = JSON_TIMESTAMP_FIELDS
-        .iter()
-        .find_map(|&field| json.get(field))?;
-
-    match ts_value {
-        Value::String(s) => parse_timestamp_str(s),
-        Value::Number(n) => n.as_f64().and_then(parse_epoch),
-        _ => None,
+    for &field in JSON_TIMESTAMP_FIELDS {
+        if let Some(ts_value) = json.get(field) {
+            let parsed = match ts_value {
+                Value::String(s) => parse_timestamp_str(s),
+                Value::Number(n) => n.as_f64().and_then(parse_epoch),
+                _ => None,
+            };
+            if parsed.is_some() {
+                return parsed;
+            }
+        }
     }
+    None
 }
 
 /// Returns the compiled regex for extracting timestamps from plain text log lines.
@@ -167,10 +171,10 @@ fn extract_json_timestamp(json: &Value) -> Option<DateTime<Local>> {
 fn plain_text_timestamp_regex() -> Option<&'static Regex> {
     static RE: OnceLock<Option<Regex>> = OnceLock::new();
     RE.get_or_init(|| {
-        // Match hyphen-separated dates with T or space, slash-separated with space only.
-        // This avoids matching formats like 2024/06/15T10:30:45 that have no chrono parser.
+        // Match hyphen-separated dates with T or space (with optional TZ suffix),
+        // slash-separated dates with space only (no TZ — no chrono format for that combo).
         Regex::new(
-            r"^((?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)|(?:\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?))",
+            r"^((?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)|(?:\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?))",
         )
         .ok()
     })
@@ -468,6 +472,15 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_json_timestamp_fallback_to_later_field() {
+        // "timestamp" is present but unparseable; "@timestamp" is valid — should use the latter
+        let entry = parse_log(
+            r#"{"level": "INFO", "timestamp": "n/a", "@timestamp": "2024-06-15T10:30:45Z", "msg": "test"}"#.to_string(),
+        );
+        assert!(entry.timestamp.is_some());
+    }
+
+    #[test]
     fn test_parse_json_timestamp_at_timestamp_field() {
         let entry = parse_log(
             r#"{"level": "INFO", "@timestamp": "2024-06-15T10:30:45Z", "msg": "test"}"#.to_string(),
@@ -525,6 +538,14 @@ mod tests {
     fn test_parse_plain_text_slash_space_timestamp() {
         // Slash-separated date with space separator should parse
         let entry = parse_log("2024/06/15 10:30:45 some log".to_string());
+        assert!(entry.timestamp.is_some());
+    }
+
+    #[test]
+    fn test_parse_plain_text_slash_tz_stripped() {
+        // Slash-separated regex branch excludes TZ suffix, so "Z" is not captured.
+        // The remaining "2024/06/15 10:30:45" parses as a naive local time.
+        let entry = parse_log("2024/06/15 10:30:45Z some log".to_string());
         assert!(entry.timestamp.is_some());
     }
 
