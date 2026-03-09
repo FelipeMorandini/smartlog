@@ -167,8 +167,10 @@ fn extract_json_timestamp(json: &Value) -> Option<DateTime<Local>> {
 fn plain_text_timestamp_regex() -> Option<&'static Regex> {
     static RE: OnceLock<Option<Regex>> = OnceLock::new();
     RE.get_or_init(|| {
+        // Match hyphen-separated dates with T or space, slash-separated with space only.
+        // This avoids matching formats like 2024/06/15T10:30:45 that have no chrono parser.
         Regex::new(
-            r"^(\d{4}[-/]\d{2}[-/]\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)",
+            r"^((?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)|(?:\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?))",
         )
         .ok()
     })
@@ -510,6 +512,20 @@ mod tests {
     fn test_parse_plain_text_no_timestamp() {
         let entry = parse_log("just a plain log line".to_string());
         assert!(entry.timestamp.is_none());
+    }
+
+    #[test]
+    fn test_parse_plain_text_slash_t_not_matched() {
+        // Slash-separated date with T separator has no chrono parser, should not match
+        let entry = parse_log("2024/06/15T10:30:45Z some log".to_string());
+        assert!(entry.timestamp.is_none());
+    }
+
+    #[test]
+    fn test_parse_plain_text_slash_space_timestamp() {
+        // Slash-separated date with space separator should parse
+        let entry = parse_log("2024/06/15 10:30:45 some log".to_string());
+        assert!(entry.timestamp.is_some());
     }
 
     #[test]
