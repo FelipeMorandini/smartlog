@@ -51,6 +51,41 @@ fn test_help_shows_verbose_flag() {
 }
 
 #[test]
+fn test_help_shows_theme_flag() {
+    smartlog()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--theme"));
+}
+
+#[test]
+fn test_theme_flag_accepts_value() {
+    // --theme with a valid value should be accepted by the argument parser.
+    // Passing --help forces an early, successful exit before the TUI starts.
+    smartlog()
+        .arg("--theme")
+        .arg("solarized")
+        .arg("--help")
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_multiple_file_flags_accepted() {
+    // Multiple --file flags should be accepted by the argument parser.
+    // Add --help to force an early exit after parsing instead of starting the TUI.
+    smartlog()
+        .arg("--file")
+        .arg("/tmp/nonexistent1.log")
+        .arg("--file")
+        .arg("/tmp/nonexistent2.log")
+        .arg("--help")
+        .assert()
+        .success();
+}
+
+#[test]
 fn test_file_flag_with_nonexistent_path_exits_gracefully() {
     // Argument parsing succeeds; the process exits non-zero because either
     // terminal init fails (Linux/macOS CI) or the test harness timeout kills

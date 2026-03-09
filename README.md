@@ -87,6 +87,12 @@ Tail a specific log file:
 smartlog --file /var/log/myapp.log
 ```
 
+Tail multiple files at once:
+
+```
+smartlog --file /var/log/app.log --file /var/log/error.log
+```
+
 Or pipe logs directly:
 
 ```
@@ -116,6 +122,8 @@ tail -f /var/log/app.log | smartlog
 | `l` | Cycle log level filter (ALL → ERROR → WARN → INFO → DEBUG → ALL) |
 | `r` | Toggle regex filtering mode |
 | `e` | Export filtered logs to file |
+| `t` | Toggle relative timestamp display |
+| `T` | Cycle color theme (dark → light → solarized → dracula) |
 | Mouse wheel | Scroll up/down |
 | `q` | Quit application |
 
@@ -143,6 +151,33 @@ Press `e` to export the currently filtered logs to a file. The file is saved as 
 ### Debug Logging
 
 Use `--verbose` (or `-v`) to enable debug logging. Diagnostic output is written to `smartlog_debug.log` in the current directory. This is useful for troubleshooting SmartLog itself.
+
+### Relative Timestamps
+
+Press `t` to toggle relative timestamp display. When enabled, each log entry with a detected timestamp shows a prefix like `[3s ago]`, `[5m ago]`, or `[2h ago]`. Timestamps are extracted from:
+- **JSON logs**: `timestamp`, `ts`, `time`, `@timestamp`, `datetime`, `date` fields (ISO 8601 strings or Unix epoch seconds/milliseconds/microseconds)
+- **Plain text logs**: ISO 8601 or common date/time patterns at the beginning of the line, including `YYYY-MM-DD` and `YYYY/MM/DD` formats (e.g., `2024-01-15T10:30:45Z`, `2024-01-15 10:30:45`, `2024/01/15 10:30:45`)
+
+### Multi-File Tailing
+
+Tail multiple files simultaneously by specifying `--file` multiple times:
+
+```bash
+smartlog --file /var/log/app.log --file /var/log/error.log
+```
+
+Each log entry is prefixed with the source filename (e.g., `[app.log]`) so you can tell which file it came from. The status bar shows the number of active files.
+
+### Color Themes
+
+Use `--theme <name>` to set the color theme, or press `T` at runtime to cycle through themes:
+
+- **dark** (default): Designed for dark terminal backgrounds
+- **light**: Designed for light terminal backgrounds
+- **solarized**: Based on the Solarized color palette
+- **dracula**: Based on the Dracula color palette
+
+The current theme name is shown in the status bar.
 
 ## 📊 Log Format Support
 

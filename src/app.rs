@@ -2,6 +2,7 @@
 
 use crate::config::MAX_LOG_BUFFER_SIZE;
 use crate::parser::{LogEntry, LogLevel};
+use crate::theme::Theme;
 use chrono::Local;
 use regex::Regex;
 use std::collections::VecDeque;
@@ -59,6 +60,10 @@ pub struct App {
     pub export_dir: PathBuf,
     /// Transient feedback message from the last export operation
     pub last_export_message: Option<String>,
+    /// Whether to display relative timestamps before log entries
+    pub show_timestamps: bool,
+    /// Current color theme
+    pub theme: Theme,
 }
 
 impl Default for App {
@@ -85,6 +90,8 @@ impl App {
             source_label: String::new(),
             export_dir: PathBuf::from("."),
             last_export_message: None,
+            show_timestamps: false,
+            theme: Theme::DARK,
         }
     }
 
@@ -191,7 +198,13 @@ impl App {
         } else {
             filtered
                 .iter()
-                .map(|e| e.pretty.as_str())
+                .map(|e| {
+                    if let Some(ref src) = e.source {
+                        format!("[{src}] {}", e.pretty)
+                    } else {
+                        e.pretty.clone()
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join("\n")
         };
@@ -263,12 +276,15 @@ impl App {
 mod tests {
     use super::*;
     use crate::parser::{LogEntry, LogLevel};
+    use crate::theme::Theme;
 
     fn make_entry(msg: &str, level: LogLevel) -> LogEntry {
         LogEntry {
             raw: msg.to_string(),
             pretty: msg.to_string(),
             level,
+            timestamp: None,
+            source: None,
         }
     }
 
@@ -287,6 +303,8 @@ mod tests {
         assert!(app.source_label.is_empty());
         assert_eq!(app.export_dir, PathBuf::from("."));
         assert!(app.last_export_message.is_none());
+        assert!(!app.show_timestamps);
+        assert_eq!(app.theme, Theme::DARK);
     }
 
     #[test]

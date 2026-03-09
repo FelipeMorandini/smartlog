@@ -11,16 +11,17 @@ use tokio::sync::mpsc;
 use smartlog::app::App;
 use smartlog::config::CHANNEL_BUFFER_SIZE;
 use smartlog::event_loop;
-use smartlog::sources::spawn_source;
+use smartlog::sources::spawn_sources;
 use smartlog::terminal;
+use smartlog::theme::Theme;
 
 /// SmartLog: A TUI for tailing and filtering JSON logs
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Path to file to tail (optional, reads from stdin if piped, otherwise shows demo)
+    /// Path(s) to file(s) to tail (can specify multiple with repeated --file flags)
     #[arg(short, long, value_name = "FILE")]
-    file: Option<String>,
+    file: Vec<String>,
 
     /// Directory for exported log files (defaults to current directory)
     #[arg(long, value_name = "DIR")]
@@ -29,20 +30,30 @@ struct Args {
     /// Enable verbose debug logging to smartlog_debug.log
     #[arg(short, long)]
     verbose: bool,
+
+    /// Color theme: dark, light, solarized, dracula (default: dark)
+    #[arg(long, value_name = "THEME", default_value = "dark")]
+    theme: String,
 }
 
 /// Derives a human-readable source label from CLI args and stdin state.
-fn source_label(file: Option<&str>) -> String {
-    if let Some(path) = file {
-        let name = std::path::Path::new(path)
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path.to_string());
-        format!("file: {name}")
-    } else if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-        "stdin".to_string()
-    } else {
-        "demo".to_string()
+fn source_label(files: &[String]) -> String {
+    match files.len() {
+        0 => {
+            if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+                "stdin".to_string()
+            } else {
+                "demo".to_string()
+            }
+        }
+        1 => {
+            let name = std::path::Path::new(&files[0])
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| files[0].clone());
+            format!("file: {name}")
+        }
+        n => format!("{n} files"),
     }
 }
 
@@ -76,24 +87,27 @@ async fn main() -> Result<()> {
 
     // 2. Setup App State
     let mut app = App::new();
-    app.source_label = source_label(args.file.as_deref());
+    app.source_label = source_label(&args.file);
+    app.theme = Theme::by_name(&args.theme);
     if let Some(dir) = args.export_dir {
         app.export_dir = dir;
     }
-    tracing::debug!(source = %app.source_label, "App initialized");
+    tracing::debug!(source = %app.source_label, theme = app.theme.name, "App initialized");
 
     // 3. Setup Async Data Channel
     let (tx, mut rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
 
-    // 4. Spawn Data Producer (File, Stdin, or Mock)
-    let producer = spawn_source(args.file, tx);
-    tracing::debug!("Log source spawned");
+    // 4. Spawn Data Producer(s) (File(s), Stdin, or Mock)
+    let producers = spawn_sources(&args.file, tx);
+    tracing::debug!(count = producers.len(), "Log source(s) spawned");
 
     // 5. Main Event Loop
     let res = event_loop::run(&mut terminal, &mut app, &mut rx).await;
 
-    // 6. Stop producer task promptly
-    producer.abort();
+    // 6. Stop producer tasks promptly
+    for producer in &producers {
+        producer.abort();
+    }
 
     // 7. Restore Terminal (Critical step!)
     // TerminalGuard will handle restoration on drop, but we also explicitly restore

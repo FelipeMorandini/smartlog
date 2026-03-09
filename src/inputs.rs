@@ -15,7 +15,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 /// **Normal mode**: `q` quits, `/` enters editing, `k`/`j` or arrows scroll,
 /// `PageUp`/`PageDown` scroll by page, `Home`/`g` jump to top, `End`/`G` jump to bottom,
 /// `Esc` clears search, `w` toggles line wrap, `l` cycles log level filter,
-/// `r` toggles regex mode, `e` exports filtered logs
+/// `r` toggles regex mode, `e` exports filtered logs, `t` toggles relative timestamps,
+/// `T` cycles color theme
 ///
 /// **Editing mode**: `Enter` applies filter, `Esc` cancels and clears filter,
 /// characters are added to input buffer
@@ -49,6 +50,8 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
                 app.clamp_scroll();
             }
             KeyCode::Char('e') => app.export_logs(),
+            KeyCode::Char('t') => app.show_timestamps = !app.show_timestamps,
+            KeyCode::Char('T') => app.theme = app.theme.next(),
             KeyCode::Esc => {
                 app.input_buffer.clear();
                 app.clamp_scroll();
@@ -84,6 +87,7 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
 mod tests {
     use super::*;
     use crate::parser::{LogEntry, LogLevel};
+    use crate::theme::Theme;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
     fn key(code: KeyCode) -> KeyEvent {
@@ -102,6 +106,8 @@ mod tests {
                 raw: format!("log {}", i),
                 pretty: format!("log {}", i),
                 level: LogLevel::Info,
+                timestamp: None,
+                source: None,
             });
         }
         app
@@ -368,11 +374,15 @@ mod tests {
             raw: "err".to_string(),
             pretty: "err".to_string(),
             level: LogLevel::Error,
+            timestamp: None,
+            source: None,
         });
         app.on_log(LogEntry {
             raw: "info".to_string(),
             pretty: "info".to_string(),
             level: LogLevel::Info,
+            timestamp: None,
+            source: None,
         });
         app.scroll = 1;
         // Cycle to Error-only -> 1 match -> scroll clamps to 0
@@ -397,6 +407,8 @@ mod tests {
             raw: "hello 123".to_string(),
             pretty: "hello 123".to_string(),
             level: LogLevel::Info,
+            timestamp: None,
+            source: None,
         });
         app.input_buffer = "[invalid".to_string();
         app.scroll = 0;
@@ -447,5 +459,27 @@ mod tests {
         app.last_export_message = Some("previous export".to_string());
         handle_key_event(&mut app, key(KeyCode::Char('a')));
         assert!(app.last_export_message.is_none());
+    }
+
+    // --- Timestamp and theme key binding tests ---
+
+    #[test]
+    fn test_t_toggles_timestamps() {
+        let mut app = App::new();
+        assert!(!app.show_timestamps);
+        handle_key_event(&mut app, key(KeyCode::Char('t')));
+        assert!(app.show_timestamps);
+        handle_key_event(&mut app, key(KeyCode::Char('t')));
+        assert!(!app.show_timestamps);
+    }
+
+    #[test]
+    fn test_shift_t_cycles_theme() {
+        let mut app = App::new();
+        assert_eq!(app.theme, Theme::DARK);
+        handle_key_event(&mut app, key(KeyCode::Char('T')));
+        assert_eq!(app.theme, Theme::LIGHT);
+        handle_key_event(&mut app, key(KeyCode::Char('T')));
+        assert_eq!(app.theme, Theme::SOLARIZED);
     }
 }

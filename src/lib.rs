@@ -10,4 +10,5 @@ pub mod inputs;
 pub mod parser;
 pub mod sources;
 pub mod terminal;
+pub mod theme;
 pub mod ui;
