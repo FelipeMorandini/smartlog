@@ -1,6 +1,7 @@
 //! Async log input sources: stdin, file tailing, and mock generator.
 
 use crate::config::{FILE_POLL_INTERVAL_MS, MAX_LOG_LINE_SIZE};
+use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
@@ -33,16 +34,34 @@ pub struct RawLogMessage {
 pub fn spawn_sources(files: &[String], tx: mpsc::Sender<RawLogMessage>) -> Vec<JoinHandle<()>> {
     if !files.is_empty() {
         let multi = files.len() > 1;
+        let basename_counts = if multi {
+            let mut counts: HashMap<String, usize> = HashMap::new();
+            for path in files {
+                let name = Path::new(path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                *counts.entry(name).or_insert(0) += 1;
+            }
+            counts
+        } else {
+            HashMap::new()
+        };
         return files
             .iter()
             .map(|path| {
                 let source = if multi {
-                    Some(
-                        std::path::Path::new(path)
-                            .file_name()
-                            .map(|n| n.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| path.clone()),
-                    )
+                    let basename = Path::new(path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned());
+                    let label = match basename {
+                        Some(ref name) if basename_counts.get(name).copied().unwrap_or(0) > 1 => {
+                            path.clone()
+                        }
+                        Some(name) => name,
+                        None => path.clone(),
+                    };
+                    Some(label)
                 } else {
                     None
                 };
