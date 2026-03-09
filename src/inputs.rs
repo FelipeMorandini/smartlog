@@ -1,6 +1,7 @@
 //! Keyboard input handling for the application.
 
 use crate::app::{App, InputMode};
+use crate::config::MAX_INPUT_BUFFER_SIZE;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 
 /// Handles keyboard input events and updates the application state.
@@ -65,7 +66,9 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
                 app.clamp_scroll();
             }
             KeyCode::Char(c) => {
-                app.input_buffer.push(c);
+                if app.input_buffer.chars().count() < MAX_INPUT_BUFFER_SIZE {
+                    app.input_buffer.push(c);
+                }
                 app.clamp_scroll();
             }
             KeyCode::Backspace => {
@@ -315,6 +318,39 @@ mod tests {
         app.input_mode = InputMode::Editing;
         handle_key_event(&mut app, key(KeyCode::Backspace));
         assert!(app.input_buffer.is_empty());
+    }
+
+    #[test]
+    fn test_editing_char_respects_buffer_cap() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Editing;
+        app.input_buffer = "x".repeat(MAX_INPUT_BUFFER_SIZE);
+        handle_key_event(&mut app, key(KeyCode::Char('z')));
+        assert_eq!(app.input_buffer.chars().count(), MAX_INPUT_BUFFER_SIZE);
+        assert!(!app.input_buffer.contains('z'));
+    }
+
+    #[test]
+    fn test_editing_char_allows_up_to_cap() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Editing;
+        app.input_buffer = "x".repeat(MAX_INPUT_BUFFER_SIZE - 1);
+        handle_key_event(&mut app, key(KeyCode::Char('z')));
+        assert_eq!(app.input_buffer.chars().count(), MAX_INPUT_BUFFER_SIZE);
+        assert!(app.input_buffer.ends_with('z'));
+    }
+
+    #[test]
+    fn test_editing_char_cap_counts_chars_not_bytes() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Editing;
+        // Fill with multi-byte chars (é = 2 bytes each)
+        app.input_buffer = "é".repeat(MAX_INPUT_BUFFER_SIZE - 1);
+        assert!(app.input_buffer.len() > MAX_INPUT_BUFFER_SIZE);
+        // Should still allow one more character (cap is by char count)
+        handle_key_event(&mut app, key(KeyCode::Char('z')));
+        assert_eq!(app.input_buffer.chars().count(), MAX_INPUT_BUFFER_SIZE);
+        assert!(app.input_buffer.ends_with('z'));
     }
 
     // --- KeyEventKind guard tests ---
