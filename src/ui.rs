@@ -53,12 +53,14 @@ pub(crate) fn compute_raw_lines(text: &str) -> usize {
 pub(crate) fn metadata_prefix_display_width(entry: &LogEntry, show_timestamps: bool) -> usize {
     let mut width = 0;
     if let Some(ref src) = entry.source {
-        width += UnicodeWidthStr::width(format!("[{src}] ").as_str());
+        // Prefix format: "[{src}] " -> '[' + src + ']' + ' '
+        width += 3 + UnicodeWidthStr::width(src.as_str());
     }
     if show_timestamps {
         if let Some(ts) = entry.timestamp {
             let relative = format_relative_time(ts);
-            width += UnicodeWidthStr::width(format!("[{relative}] ").as_str());
+            // Prefix format: "[{relative}] " -> '[' + relative + ']' + ' '
+            width += 3 + UnicodeWidthStr::width(relative.as_str());
         }
     }
     width
