@@ -6,11 +6,13 @@ use crate::ui::{compute_raw_lines, compute_visual_lines, metadata_prefix_display
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 
 /// Computes how many entries fit in one page scrolling forward from `start`.
+///
+/// Returns 0 when the viewport has no height or there are no entries (no-op).
 fn page_entries_forward(app: &App, filtered: &[&crate::parser::LogEntry], start: usize) -> usize {
-    if filtered.is_empty() {
-        return 1;
-    }
     let height = app.visible_height as usize;
+    if filtered.is_empty() || height == 0 {
+        return 0;
+    }
     let width = app.visible_width as usize;
     let mut lines = 0;
     let mut count = 0;
@@ -31,11 +33,13 @@ fn page_entries_forward(app: &App, filtered: &[&crate::parser::LogEntry], start:
 }
 
 /// Computes how many entries fit in one page scrolling backward from `end`.
+///
+/// Returns 0 when the viewport has no height or there are no entries (no-op).
 fn page_entries_backward(app: &App, filtered: &[&crate::parser::LogEntry], end: usize) -> usize {
-    if filtered.is_empty() {
-        return 1;
-    }
     let height = app.visible_height as usize;
+    if filtered.is_empty() || height == 0 {
+        return 0;
+    }
     let width = app.visible_width as usize;
     let mut lines = 0;
     let mut count = 0;
@@ -365,6 +369,27 @@ mod tests {
         // No logs match the filter — should be a no-op, not a panic
         handle_key_event(&mut app, key(KeyCode::PageDown));
         assert_eq!(app.scroll, 0);
+    }
+
+    #[test]
+    fn test_page_down_zero_height_is_noop() {
+        let mut app = app_with_logs(20);
+        app.auto_scroll = false;
+        app.scroll = 5;
+        app.visible_height = 0;
+        app.visible_width = 80;
+        handle_key_event(&mut app, key(KeyCode::PageDown));
+        assert_eq!(app.scroll, 5);
+    }
+
+    #[test]
+    fn test_page_up_zero_height_is_noop() {
+        let mut app = app_with_logs(20);
+        app.scroll = 5;
+        app.visible_height = 0;
+        app.visible_width = 80;
+        handle_key_event(&mut app, key(KeyCode::PageUp));
+        assert_eq!(app.scroll, 5);
     }
 
     // --- Scroll clamping on filter change tests ---
