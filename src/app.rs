@@ -45,7 +45,7 @@ pub struct App {
     /// Flag to signal the application should quit
     pub should_quit: bool,
     /// Total number of logs processed (for debugging)
-    pub logs_processed: usize,
+    pub logs_processed: u64,
     /// Visible height of the log area (updated each frame from terminal size)
     pub visible_height: u16,
     /// Whether line wrapping is enabled
@@ -316,13 +316,22 @@ mod tests {
     }
 
     #[test]
+    fn test_logs_processed_is_u64() {
+        let mut app = App::new();
+        // Verify the counter is u64, not usize — can hold values beyond u32::MAX
+        app.logs_processed = u64::from(u32::MAX) + 1;
+        app.on_log(make_entry("test", LogLevel::Info));
+        assert_eq!(app.logs_processed, u64::from(u32::MAX) + 2);
+    }
+
+    #[test]
     fn test_on_log_buffer_overflow_evicts_oldest() {
         let mut app = App::new();
         for i in 0..MAX_LOG_BUFFER_SIZE + 10 {
             app.on_log(make_entry(&format!("log {}", i), LogLevel::Info));
         }
         assert_eq!(app.logs.len(), MAX_LOG_BUFFER_SIZE);
-        assert_eq!(app.logs_processed, MAX_LOG_BUFFER_SIZE + 10);
+        assert_eq!(app.logs_processed, (MAX_LOG_BUFFER_SIZE + 10) as u64);
         assert_eq!(app.logs.front().unwrap().pretty, "log 10");
     }
 

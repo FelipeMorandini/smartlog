@@ -24,6 +24,11 @@ pub const CHANNEL_BUFFER_SIZE: usize = 100;
 /// `BufReader`'s internal buffer and any temporary UTF-8 decoding overhead.
 pub const MAX_LOG_LINE_SIZE: usize = 65_536; // 64 KB
 
+/// Maximum length of the search input buffer in characters.
+///
+/// Prevents unbounded memory growth from user input in the filter bar.
+pub const MAX_INPUT_BUFFER_SIZE: usize = 256;
+
 /// Polling interval for file changes in milliseconds.
 ///
 /// This determines how frequently we check for new content in tailed files.

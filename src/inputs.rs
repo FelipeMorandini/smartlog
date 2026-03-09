@@ -1,6 +1,7 @@
 //! Keyboard input handling for the application.
 
 use crate::app::{App, InputMode};
+use crate::config::MAX_INPUT_BUFFER_SIZE;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 
 /// Handles keyboard input events and updates the application state.
@@ -65,7 +66,9 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
                 app.clamp_scroll();
             }
             KeyCode::Char(c) => {
-                app.input_buffer.push(c);
+                if app.input_buffer.len() < MAX_INPUT_BUFFER_SIZE {
+                    app.input_buffer.push(c);
+                }
                 app.clamp_scroll();
             }
             KeyCode::Backspace => {
@@ -315,6 +318,26 @@ mod tests {
         app.input_mode = InputMode::Editing;
         handle_key_event(&mut app, key(KeyCode::Backspace));
         assert!(app.input_buffer.is_empty());
+    }
+
+    #[test]
+    fn test_editing_char_respects_buffer_cap() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Editing;
+        app.input_buffer = "x".repeat(MAX_INPUT_BUFFER_SIZE);
+        handle_key_event(&mut app, key(KeyCode::Char('z')));
+        assert_eq!(app.input_buffer.len(), MAX_INPUT_BUFFER_SIZE);
+        assert!(!app.input_buffer.contains('z'));
+    }
+
+    #[test]
+    fn test_editing_char_allows_up_to_cap() {
+        let mut app = App::new();
+        app.input_mode = InputMode::Editing;
+        app.input_buffer = "x".repeat(MAX_INPUT_BUFFER_SIZE - 1);
+        handle_key_event(&mut app, key(KeyCode::Char('z')));
+        assert_eq!(app.input_buffer.len(), MAX_INPUT_BUFFER_SIZE);
+        assert!(app.input_buffer.ends_with('z'));
     }
 
     // --- KeyEventKind guard tests ---
