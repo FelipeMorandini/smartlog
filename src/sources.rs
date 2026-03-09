@@ -140,7 +140,7 @@ async fn wait_for_file(
                 })
                 .await;
             loop {
-                tokio::time::sleep(Duration::from_millis(500)).await;
+                tokio::time::sleep(Duration::from_millis(FILE_POLL_INTERVAL_MS)).await;
                 if let Ok(meta) = fs::metadata(path).await {
                     let _ = tx
                         .send(RawLogMessage {

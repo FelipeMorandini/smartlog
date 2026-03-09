@@ -78,7 +78,14 @@ const JSON_TIMESTAMP_FIELDS: &[&str] =
     &["timestamp", "ts", "time", "@timestamp", "datetime", "date"];
 
 /// Formats for parsing timestamps with timezone information.
-const TZ_FORMATS: &[&str] = &["%Y-%m-%dT%H:%M:%S%.f%:z", "%Y-%m-%dT%H:%M:%S%:z"];
+const TZ_FORMATS: &[&str] = &[
+    // With colon in offset, e.g. 2024-01-01T12:34:56.789+05:30
+    "%Y-%m-%dT%H:%M:%S%.f%:z",
+    "%Y-%m-%dT%H:%M:%S%:z",
+    // Without colon in offset, e.g. 2024-01-01T12:34:56.789+0530
+    "%Y-%m-%dT%H:%M:%S%.f%z",
+    "%Y-%m-%dT%H:%M:%S%z",
+];
 
 /// Formats for parsing timestamps without timezone (assumed local).
 const NAIVE_FORMATS: &[&str] = &[
@@ -126,8 +133,8 @@ fn parse_epoch(value: f64) -> Option<DateTime<Local>> {
         value
     };
 
-    let mut secs = seconds.trunc() as i64;
-    let frac = seconds.fract().abs();
+    let mut secs = seconds.floor() as i64;
+    let frac = seconds - (secs as f64);
     let mut nanos = (frac * 1_000_000_000.0).round() as u32;
 
     // Normalize so nanos is always < 1_000_000_000
@@ -518,6 +525,18 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_timestamp_str_with_offset_no_colon() {
+        let result = parse_timestamp_str("2024-06-15T10:30:45+0530");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_parse_timestamp_str_with_offset_no_colon_fractional() {
+        let result = parse_timestamp_str("2024-06-15T10:30:45.123+0530");
+        assert!(result.is_some());
+    }
+
+    #[test]
     fn test_parse_timestamp_str_naive_datetime() {
         let result = parse_timestamp_str("2024-06-15 10:30:45");
         assert!(result.is_some());
@@ -533,6 +552,18 @@ mod tests {
     fn test_parse_epoch_seconds() {
         let result = parse_epoch(1718447445.0);
         assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_parse_epoch_negative_fractional() {
+        // -1.2 seconds before epoch should produce a valid timestamp
+        let result = parse_epoch(-1.2);
+        assert!(result.is_some());
+        let dt = result.unwrap();
+        // Should be 1969-12-31T23:59:58.8 UTC (epoch - 1.2s)
+        let utc = dt.with_timezone(&chrono::Utc);
+        assert_eq!(utc.timestamp(), -2);
+        assert_eq!(utc.timestamp_subsec_nanos() / 100_000_000, 8); // ~800ms
     }
 
     #[test]

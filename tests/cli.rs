@@ -61,8 +61,8 @@ fn test_help_shows_theme_flag() {
 
 #[test]
 fn test_theme_flag_accepts_value() {
-    // --theme with a valid value should not cause an argument parsing error
-    // The process will fail because no TTY is available, but it should get past parsing
+    // --theme with a valid value should be accepted by the argument parser.
+    // Passing --help forces an early, successful exit before the TUI starts.
     smartlog()
         .arg("--theme")
         .arg("solarized")
