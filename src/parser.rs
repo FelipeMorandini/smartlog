@@ -104,7 +104,7 @@ fn parse_timestamp_str(s: &str) -> Option<DateTime<Local>> {
     }
     for fmt in NAIVE_FORMATS {
         if let Ok(naive) = NaiveDateTime::parse_from_str(s, fmt) {
-            return naive.and_local_timezone(Local).single();
+            return naive.and_local_timezone(Local).earliest();
         }
     }
     None
@@ -114,20 +114,29 @@ fn parse_timestamp_str(s: &str) -> Option<DateTime<Local>> {
 ///
 /// Detects seconds vs. milliseconds vs. microseconds based on magnitude.
 fn parse_epoch(value: f64) -> Option<DateTime<Local>> {
-    let (secs, nanos) = if value > 1e15 {
+    let abs = value.abs();
+    let seconds = if abs > 1e15 {
         // Microseconds
-        let s = (value / 1_000_000.0) as i64;
-        let n = ((value % 1_000_000.0) * 1000.0) as u32;
-        (s, n)
-    } else if value > 1e12 {
+        value / 1_000_000.0
+    } else if abs > 1e12 {
         // Milliseconds
-        let s = (value / 1000.0) as i64;
-        let n = ((value % 1000.0) * 1_000_000.0) as u32;
-        (s, n)
+        value / 1000.0
     } else {
         // Seconds
-        (value as i64, (value.fract() * 1e9) as u32)
+        value
     };
+
+    let mut secs = seconds.trunc() as i64;
+    let frac = seconds.fract().abs();
+    let mut nanos = (frac * 1_000_000_000.0).round() as u32;
+
+    // Normalize so nanos is always < 1_000_000_000
+    if nanos >= 1_000_000_000 {
+        let carry = (nanos / 1_000_000_000) as i64;
+        secs = secs.checked_add(carry)?;
+        nanos %= 1_000_000_000;
+    }
+
     DateTime::from_timestamp(secs, nanos).map(|dt| dt.with_timezone(&Local))
 }
 

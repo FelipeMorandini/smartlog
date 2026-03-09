@@ -73,15 +73,16 @@ fn test_theme_flag_accepts_value() {
 
 #[test]
 fn test_multiple_file_flags_accepted() {
-    // Multiple --file flags should be accepted by the argument parser
+    // Multiple --file flags should be accepted by the argument parser.
+    // Add --help to force an early exit after parsing instead of starting the TUI.
     smartlog()
         .arg("--file")
         .arg("/tmp/nonexistent1.log")
         .arg("--file")
         .arg("/tmp/nonexistent2.log")
-        .timeout(std::time::Duration::from_secs(5))
+        .arg("--help")
         .assert()
-        .failure(); // Fails because no TTY, but args are valid
+        .success();
 }
 
 #[test]
