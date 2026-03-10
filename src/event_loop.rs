@@ -203,7 +203,7 @@ mod tests {
     fn raw_msg_with_source(line: &str, source: &str) -> Option<RawLogMessage> {
         Some(RawLogMessage {
             line: line.to_string(),
-            source: Some(source.to_string()),
+            source: Some(std::sync::Arc::from(source)),
         })
     }
 
@@ -231,7 +231,7 @@ mod tests {
         let mut app = App::new();
         let open = handle_log_message(&mut app, raw_msg_with_source("hello", "app.log"));
         assert!(open);
-        assert_eq!(app.logs[0].source, Some("app.log".to_string()));
+        assert_eq!(app.logs[0].source, Some(std::sync::Arc::from("app.log")));
     }
 
     // --- handle_terminal_event tests ---

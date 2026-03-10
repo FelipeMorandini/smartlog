@@ -3,12 +3,18 @@
 use crate::app::{App, InputMode};
 use crate::config::MAX_INPUT_BUFFER_SIZE;
 use crate::ui::{compute_raw_lines, compute_visual_lines, metadata_prefix_display_width};
+use chrono::{DateTime, Local};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 
 /// Computes how many entries fit in one page scrolling forward from `start`.
 ///
 /// Returns 0 when the viewport has no height or there are no entries (no-op).
-fn page_entries_forward(app: &App, filtered: &[&crate::parser::LogEntry], start: usize) -> usize {
+fn page_entries_forward(
+    app: &App,
+    filtered: &[&crate::parser::LogEntry],
+    start: usize,
+    now: DateTime<Local>,
+) -> usize {
     let height = app.visible_height as usize;
     if filtered.is_empty() || height == 0 {
         return 0;
@@ -18,7 +24,7 @@ fn page_entries_forward(app: &App, filtered: &[&crate::parser::LogEntry], start:
     let mut count = 0;
     for entry in &filtered[start..] {
         let entry_lines = if app.line_wrap {
-            let pw = metadata_prefix_display_width(entry, app.show_timestamps);
+            let pw = metadata_prefix_display_width(entry, app.show_timestamps, now);
             compute_visual_lines(&entry.pretty, width, pw)
         } else {
             compute_raw_lines(&entry.pretty)
@@ -35,7 +41,12 @@ fn page_entries_forward(app: &App, filtered: &[&crate::parser::LogEntry], start:
 /// Computes how many entries fit in one page scrolling backward from `end`.
 ///
 /// Returns 0 when the viewport has no height or there are no entries (no-op).
-fn page_entries_backward(app: &App, filtered: &[&crate::parser::LogEntry], end: usize) -> usize {
+fn page_entries_backward(
+    app: &App,
+    filtered: &[&crate::parser::LogEntry],
+    end: usize,
+    now: DateTime<Local>,
+) -> usize {
     let height = app.visible_height as usize;
     if filtered.is_empty() || height == 0 {
         return 0;
@@ -45,7 +56,7 @@ fn page_entries_backward(app: &App, filtered: &[&crate::parser::LogEntry], end: 
     let mut count = 0;
     for entry in filtered[..=end].iter().rev() {
         let entry_lines = if app.line_wrap {
-            let pw = metadata_prefix_display_width(entry, app.show_timestamps);
+            let pw = metadata_prefix_display_width(entry, app.show_timestamps, now);
             compute_visual_lines(&entry.pretty, width, pw)
         } else {
             compute_raw_lines(&entry.pretty)
@@ -95,13 +106,15 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
             KeyCode::PageUp => {
                 let filtered = app.get_filtered_logs();
                 let pos = app.scroll.min(filtered.len().saturating_sub(1));
-                let n = page_entries_backward(app, &filtered, pos);
+                let now = Local::now();
+                let n = page_entries_backward(app, &filtered, pos, now);
                 app.scroll_up_by(n);
             }
             KeyCode::PageDown => {
                 let filtered = app.get_filtered_logs();
                 let pos = app.scroll.min(filtered.len().saturating_sub(1));
-                let n = page_entries_forward(app, &filtered, pos);
+                let now = Local::now();
+                let n = page_entries_forward(app, &filtered, pos, now);
                 app.scroll_down_by(n);
             }
             KeyCode::Home | KeyCode::Char('g') => app.scroll_to_top(),
@@ -113,6 +126,7 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
             }
             KeyCode::Char('r') => {
                 app.use_regex = !app.use_regex;
+                app.rebuild_matcher();
                 app.clamp_scroll();
             }
             KeyCode::Char('e') => app.export_logs(),
@@ -120,6 +134,7 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
             KeyCode::Char('T') => app.theme = app.theme.next(),
             KeyCode::Esc => {
                 app.input_buffer.clear();
+                app.rebuild_matcher();
                 app.clamp_scroll();
                 app.auto_scroll = true;
             }
@@ -133,16 +148,19 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
             KeyCode::Char(c) => {
                 if app.input_buffer.chars().count() < MAX_INPUT_BUFFER_SIZE {
                     app.input_buffer.push(c);
+                    app.rebuild_matcher();
                 }
                 app.clamp_scroll();
             }
             KeyCode::Backspace => {
                 app.input_buffer.pop();
+                app.rebuild_matcher();
                 app.clamp_scroll();
             }
             KeyCode::Esc => {
                 app.input_mode = InputMode::Normal;
                 app.input_buffer.clear();
+                app.rebuild_matcher();
                 app.clamp_scroll();
                 app.auto_scroll = true;
             }
@@ -350,6 +368,7 @@ mod tests {
     fn test_page_up_empty_filtered_no_panic() {
         let mut app = App::new();
         app.input_buffer = "nonexistent".to_string();
+        app.rebuild_matcher();
         app.scroll = 0;
         app.visible_height = 20;
         app.visible_width = 80;
@@ -362,6 +381,7 @@ mod tests {
     fn test_page_down_empty_filtered_no_panic() {
         let mut app = App::new();
         app.input_buffer = "nonexistent".to_string();
+        app.rebuild_matcher();
         app.auto_scroll = false;
         app.scroll = 0;
         app.visible_height = 20;
@@ -422,6 +442,7 @@ mod tests {
         let mut app = app_with_logs(10);
         app.input_mode = InputMode::Editing;
         app.input_buffer = "log 0".to_string();
+        app.rebuild_matcher();
         app.scroll = 5; // Beyond the 1 match
         handle_key_event(&mut app, key(KeyCode::Enter));
         assert_eq!(app.scroll, 0);
@@ -665,6 +686,46 @@ mod tests {
         assert!(app.show_timestamps);
         handle_key_event(&mut app, key(KeyCode::Char('t')));
         assert!(!app.show_timestamps);
+    }
+
+    #[test]
+    fn test_r_toggle_rebuilds_matcher() {
+        let mut app = App::new();
+        app.on_log(crate::parser::LogEntry {
+            raw: "error 42".to_string(),
+            pretty: "error 42".to_string(),
+            level: LogLevel::Info,
+            timestamp: None,
+            source: None,
+        });
+        app.input_buffer = r"\d+".to_string();
+        // Without regex mode, substring "\d+" doesn't match "error 42"
+        app.rebuild_matcher();
+        assert_eq!(app.get_filtered_count(), 0);
+        // Toggle regex on via key — should rebuild matcher
+        handle_key_event(&mut app, key(KeyCode::Char('r')));
+        assert!(app.use_regex);
+        assert_eq!(app.get_filtered_count(), 1);
+    }
+
+    #[test]
+    fn test_editing_esc_rebuilds_matcher() {
+        let mut app = App::new();
+        app.on_log(crate::parser::LogEntry {
+            raw: "hello".to_string(),
+            pretty: "hello".to_string(),
+            level: LogLevel::Info,
+            timestamp: None,
+            source: None,
+        });
+        app.input_mode = InputMode::Editing;
+        app.input_buffer = "hello".to_string();
+        app.rebuild_matcher();
+        assert_eq!(app.get_filtered_count(), 1);
+        // Esc clears input and rebuilds matcher → all entries match
+        handle_key_event(&mut app, key(KeyCode::Esc));
+        assert_eq!(app.get_filtered_count(), 1); // 1 entry, no filter
+        assert!(app.input_buffer.is_empty());
     }
 
     #[test]

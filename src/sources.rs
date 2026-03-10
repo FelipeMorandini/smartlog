@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::fs;
@@ -19,7 +20,8 @@ pub struct RawLogMessage {
     /// The raw log line text.
     pub line: String,
     /// Optional source identifier (e.g., filename for multi-file tailing).
-    pub source: Option<String>,
+    /// Uses `Arc<str>` so cloning per message is a cheap pointer copy.
+    pub source: Option<Arc<str>>,
 }
 
 /// Spawns log source(s) based on CLI args and whether stdin is a TTY.
@@ -50,7 +52,7 @@ pub fn spawn_sources(files: &[String], tx: mpsc::Sender<RawLogMessage>) -> Vec<J
         return files
             .iter()
             .map(|path| {
-                let source = if multi {
+                let source: Option<Arc<str>> = if multi {
                     let basename = Path::new(path)
                         .file_name()
                         .map(|n| n.to_string_lossy().into_owned());
@@ -61,7 +63,7 @@ pub fn spawn_sources(files: &[String], tx: mpsc::Sender<RawLogMessage>) -> Vec<J
                         Some(name) => name,
                         None => path.clone(),
                     };
-                    Some(label)
+                    Some(Arc::from(label))
                 } else {
                     None
                 };
@@ -87,7 +89,7 @@ pub fn spawn_sources(files: &[String], tx: mpsc::Sender<RawLogMessage>) -> Vec<J
 /// - Keeps file handle open across poll cycles for efficiency
 fn spawn_tail_file(
     path: PathBuf,
-    source: Option<String>,
+    source: Option<Arc<str>>,
     tx: mpsc::Sender<RawLogMessage>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
@@ -147,7 +149,7 @@ fn spawn_tail_file(
 async fn wait_for_file(
     path: &Path,
     tx: &mpsc::Sender<RawLogMessage>,
-    source: &Option<String>,
+    source: &Option<Arc<str>>,
 ) -> u64 {
     match fs::metadata(path).await {
         Ok(meta) => meta.len(),
@@ -188,7 +190,7 @@ async fn open_and_seek(path: &Path, offset: u64) -> Option<BufReader<fs::File>> 
 async fn read_new_lines(
     reader: &mut BufReader<fs::File>,
     tx: &mpsc::Sender<RawLogMessage>,
-    source: &Option<String>,
+    source: &Option<Arc<str>>,
     buf: &mut String,
     raw: &mut Vec<u8>,
 ) -> Result<(), ()> {
