@@ -6,6 +6,7 @@ use crate::theme::Theme;
 use chrono::Local;
 use regex::Regex;
 use std::collections::VecDeque;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -66,6 +67,8 @@ pub struct App {
     pub show_timestamps: bool,
     /// Current color theme
     pub theme: Theme,
+    /// Cached text matcher, rebuilt when `input_buffer` or `use_regex` changes.
+    cached_matcher: TextMatcher,
 }
 
 impl Default for App {
@@ -95,7 +98,15 @@ impl App {
             last_export_message: None,
             show_timestamps: false,
             theme: Theme::DARK,
+            cached_matcher: TextMatcher::None,
         }
+    }
+
+    /// Rebuilds the cached text matcher from current input state.
+    ///
+    /// Must be called after any mutation to `input_buffer` or `use_regex`.
+    pub fn rebuild_matcher(&mut self) {
+        self.cached_matcher = self.compile_matcher();
     }
 
     /// Adds a new log entry to the buffer.
@@ -154,10 +165,9 @@ impl App {
 
     /// Returns the filtered log entries based on text query and log level.
     pub fn get_filtered_logs(&self) -> Vec<&LogEntry> {
-        let matcher = self.build_text_matcher();
         self.logs
             .iter()
-            .filter(|l| self.matches_level(l) && Self::matches_text(l, &matcher))
+            .filter(|l| self.matches_level(l) && Self::matches_text(l, &self.cached_matcher))
             .collect()
     }
 
@@ -172,8 +182,14 @@ impl App {
     }
 
     /// Returns the number of log entries matching the current filter.
+    ///
+    /// Uses a direct `.filter().count()` instead of allocating a `Vec` via
+    /// `get_filtered_logs()`.
     pub fn get_filtered_count(&self) -> usize {
-        self.get_filtered_logs().len()
+        self.logs
+            .iter()
+            .filter(|l| self.matches_level(l) && Self::matches_text(l, &self.cached_matcher))
+            .count()
     }
 
     /// Cycles the minimum log level filter.
@@ -186,6 +202,8 @@ impl App {
 
     /// Exports currently filtered logs to a timestamped file in the export directory.
     ///
+    /// Uses a buffered writer to stream entries directly to disk, avoiding a
+    /// large intermediate `String` allocation (TD-17).
     /// Sets `last_export_message` with the result (success path or error).
     pub fn export_logs(&mut self) {
         static EXPORT_COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -196,26 +214,30 @@ impl App {
         let filename = format!("smartlog_export_{}_{}.log", timestamp, seq);
         let path = self.export_dir.join(&filename);
 
-        let content: String = if filtered.is_empty() {
-            "# No log entries matched the current filter.\n".to_string()
-        } else {
-            filtered
-                .iter()
-                .map(|e| {
-                    if let Some(ref src) = e.source {
-                        format!("[{src}] {}", e.pretty)
-                    } else {
-                        e.pretty.clone()
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-
         let count = filtered.len();
         let label = if count == 1 { "log" } else { "logs" };
 
-        match std::fs::write(&path, &content) {
+        let result = (|| -> std::io::Result<()> {
+            let file = std::fs::File::create(&path)?;
+            let mut writer = std::io::BufWriter::new(file);
+            if filtered.is_empty() {
+                writer.write_all(b"# No log entries matched the current filter.\n")?;
+            } else {
+                for (i, e) in filtered.iter().enumerate() {
+                    if let Some(ref src) = e.source {
+                        write!(writer, "[{src}] ")?;
+                    }
+                    writer.write_all(e.pretty.as_bytes())?;
+                    if i + 1 < count {
+                        writer.write_all(b"\n")?;
+                    }
+                }
+            }
+            writer.flush()?;
+            Ok(())
+        })();
+
+        match result {
             Ok(()) => {
                 tracing::debug!(path = %path.display(), count, "Exported logs");
                 self.last_export_message =
@@ -233,16 +255,13 @@ impl App {
         self.last_export_message = None;
     }
 
-    /// Returns true if the compiled regex (when in regex mode) is invalid.
+    /// Returns true if the cached text matcher is an invalid regex.
     pub fn is_regex_invalid(&self) -> bool {
-        if !self.use_regex || self.input_buffer.is_empty() {
-            return false;
-        }
-        matches!(self.build_text_matcher(), TextMatcher::Invalid)
+        matches!(self.cached_matcher, TextMatcher::Invalid)
     }
 
-    /// Builds a text matcher from the current input buffer and mode.
-    fn build_text_matcher(&self) -> TextMatcher {
+    /// Compiles a text matcher from the current input buffer and mode.
+    fn compile_matcher(&self) -> TextMatcher {
         if self.input_buffer.is_empty() {
             return TextMatcher::None;
         }
@@ -448,6 +467,7 @@ mod tests {
         app.on_log(make_entry("gamma", LogLevel::Info));
         app.scroll = 2;
         app.input_buffer = "alpha".to_string();
+        app.rebuild_matcher();
         // Only 1 match, so scroll should clamp to 0
         app.clamp_scroll();
         assert_eq!(app.scroll, 0);
@@ -459,6 +479,7 @@ mod tests {
         app.on_log(make_entry("hello", LogLevel::Info));
         app.scroll = 5;
         app.input_buffer = "zzz".to_string();
+        app.rebuild_matcher();
         app.clamp_scroll();
         assert_eq!(app.scroll, 0);
     }
@@ -478,6 +499,7 @@ mod tests {
     fn test_scroll_down_empty_filter_no_auto_scroll() {
         let mut app = App::new();
         app.input_buffer = "nonexistent".to_string();
+        app.rebuild_matcher();
         app.auto_scroll = false;
         app.scroll = 0;
         app.scroll_down();
@@ -488,6 +510,7 @@ mod tests {
     fn test_scroll_down_by_empty_filter_no_auto_scroll() {
         let mut app = App::new();
         app.input_buffer = "nonexistent".to_string();
+        app.rebuild_matcher();
         app.auto_scroll = false;
         app.scroll = 0;
         app.scroll_down_by(10);
@@ -508,6 +531,7 @@ mod tests {
         app.on_log(make_entry("hello", LogLevel::Info));
         app.on_log(make_entry("world", LogLevel::Warn));
         app.input_buffer = "hello".to_string();
+        app.rebuild_matcher();
         assert_eq!(app.get_filtered_count(), 1);
     }
 
@@ -517,6 +541,7 @@ mod tests {
         app.on_log(make_entry("error occurred", LogLevel::Error));
         app.on_log(make_entry("info message", LogLevel::Info));
         app.input_buffer = "error".to_string();
+        app.rebuild_matcher();
         let filtered = app.get_filtered_logs();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].pretty, "error occurred");
@@ -528,6 +553,7 @@ mod tests {
         app.on_log(make_entry("Hello World", LogLevel::Info));
         app.on_log(make_entry("goodbye", LogLevel::Info));
         app.input_buffer = "HELLO".to_string();
+        app.rebuild_matcher();
         assert_eq!(app.get_filtered_logs().len(), 1);
     }
 
@@ -591,6 +617,7 @@ mod tests {
         app.on_log(make_entry("warn: disk usage", LogLevel::Warn));
         app.min_log_level = Some(LogLevel::Error);
         app.input_buffer = "disk".to_string();
+        app.rebuild_matcher();
         assert_eq!(app.get_filtered_count(), 1);
         assert_eq!(app.get_filtered_logs()[0].pretty, "error: disk full");
     }
@@ -605,6 +632,7 @@ mod tests {
         app.on_log(make_entry("info ok", LogLevel::Info));
         app.use_regex = true;
         app.input_buffer = r"error \d+".to_string();
+        app.rebuild_matcher();
         assert_eq!(app.get_filtered_count(), 2);
     }
 
@@ -615,6 +643,7 @@ mod tests {
         app.on_log(make_entry("error too", LogLevel::Error));
         app.use_regex = true;
         app.input_buffer = "error".to_string();
+        app.rebuild_matcher();
         assert_eq!(app.get_filtered_count(), 2);
     }
 
@@ -624,6 +653,7 @@ mod tests {
         app.on_log(make_entry("hello", LogLevel::Info));
         app.use_regex = true;
         app.input_buffer = "[invalid".to_string();
+        app.rebuild_matcher();
         assert_eq!(app.get_filtered_count(), 0);
     }
 
@@ -632,6 +662,7 @@ mod tests {
         let mut app = App::new();
         app.use_regex = true;
         app.input_buffer = "[bad".to_string();
+        app.rebuild_matcher();
         assert!(app.is_regex_invalid());
     }
 
@@ -640,6 +671,7 @@ mod tests {
         let mut app = App::new();
         app.use_regex = true;
         app.input_buffer = r"\d+".to_string();
+        app.rebuild_matcher();
         assert!(!app.is_regex_invalid());
     }
 
@@ -647,6 +679,7 @@ mod tests {
     fn test_is_regex_invalid_false_empty() {
         let mut app = App::new();
         app.use_regex = true;
+        app.rebuild_matcher();
         assert!(!app.is_regex_invalid());
     }
 
@@ -655,6 +688,7 @@ mod tests {
         let mut app = App::new();
         app.use_regex = false;
         app.input_buffer = "[bad".to_string();
+        app.rebuild_matcher();
         assert!(!app.is_regex_invalid());
     }
 
@@ -664,6 +698,7 @@ mod tests {
         app.on_log(make_entry("a", LogLevel::Info));
         app.on_log(make_entry("b", LogLevel::Info));
         app.use_regex = true;
+        app.rebuild_matcher();
         assert_eq!(app.get_filtered_count(), 2);
     }
 
@@ -675,6 +710,7 @@ mod tests {
         app.on_log(make_entry("info: code 99", LogLevel::Info));
         app.use_regex = true;
         app.input_buffer = r"code \d{2}".to_string();
+        app.rebuild_matcher();
         app.min_log_level = Some(LogLevel::Warn);
         // error + warn match level, all 3 match regex, but info is filtered by level
         assert_eq!(app.get_filtered_count(), 2);
@@ -752,6 +788,7 @@ mod tests {
         app.on_log(make_entry("keep this", LogLevel::Info));
         app.on_log(make_entry("drop this", LogLevel::Info));
         app.input_buffer = "keep".to_string();
+        app.rebuild_matcher();
 
         app.export_logs();
 
@@ -767,6 +804,7 @@ mod tests {
         let mut app = App::new();
         app.export_dir = dir.clone();
         app.input_buffer = "nomatch".to_string();
+        app.rebuild_matcher();
 
         app.export_logs();
 
@@ -793,5 +831,93 @@ mod tests {
         assert!(msg.contains("Export failed"));
 
         let _ = std::fs::remove_file(&file_path);
+    }
+
+    #[test]
+    fn test_export_logs_with_source_prefix() {
+        let dir = unique_temp_dir("export_source");
+        let mut app = App::new();
+        app.export_dir = dir.clone();
+        app.on_log(LogEntry {
+            raw: "hello".to_string(),
+            pretty: "hello".to_string(),
+            level: LogLevel::Info,
+            timestamp: None,
+            source: Some(std::sync::Arc::from("app.log")),
+        });
+        app.on_log(LogEntry {
+            raw: "world".to_string(),
+            pretty: "world".to_string(),
+            level: LogLevel::Info,
+            timestamp: None,
+            source: None,
+        });
+
+        app.export_logs();
+
+        let files: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert_eq!(files.len(), 1);
+        let content = std::fs::read_to_string(files[0].path()).unwrap();
+        assert!(content.contains("[app.log] hello"));
+        assert!(content.contains("world"));
+        // "world" should NOT have a source prefix
+        assert!(!content.contains("[app.log] world"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- Cached matcher tests ---
+
+    #[test]
+    fn test_rebuild_matcher_updates_filtering() {
+        let mut app = App::new();
+        app.on_log(make_entry("alpha", LogLevel::Info));
+        app.on_log(make_entry("beta", LogLevel::Info));
+        // Without rebuild, cached matcher is None → all match
+        assert_eq!(app.get_filtered_count(), 2);
+        app.input_buffer = "alpha".to_string();
+        // Still 2 because cached matcher hasn't been rebuilt
+        assert_eq!(app.get_filtered_count(), 2);
+        app.rebuild_matcher();
+        // Now only "alpha" matches
+        assert_eq!(app.get_filtered_count(), 1);
+    }
+
+    #[test]
+    fn test_rebuild_matcher_clears_on_empty_buffer() {
+        let mut app = App::new();
+        app.on_log(make_entry("hello", LogLevel::Info));
+        app.input_buffer = "hello".to_string();
+        app.rebuild_matcher();
+        assert_eq!(app.get_filtered_count(), 1);
+        app.input_buffer.clear();
+        app.rebuild_matcher();
+        assert_eq!(app.get_filtered_count(), 1); // still 1 entry, all match
+    }
+
+    #[test]
+    fn test_rebuild_matcher_regex_mode() {
+        let mut app = App::new();
+        app.on_log(make_entry("error 42", LogLevel::Error));
+        app.on_log(make_entry("info ok", LogLevel::Info));
+        app.use_regex = true;
+        app.input_buffer = r"\d+".to_string();
+        app.rebuild_matcher();
+        assert_eq!(app.get_filtered_count(), 1);
+        assert_eq!(app.get_filtered_logs()[0].pretty, "error 42");
+    }
+
+    #[test]
+    fn test_rebuild_matcher_invalid_regex() {
+        let mut app = App::new();
+        app.on_log(make_entry("test", LogLevel::Info));
+        app.use_regex = true;
+        app.input_buffer = "[bad".to_string();
+        app.rebuild_matcher();
+        assert!(app.is_regex_invalid());
+        assert_eq!(app.get_filtered_count(), 0);
     }
 }

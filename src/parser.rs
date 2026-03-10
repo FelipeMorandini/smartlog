@@ -10,7 +10,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use regex::Regex;
 use serde_json::Value;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 /// Log severity level.
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
@@ -69,8 +69,9 @@ pub struct LogEntry {
     pub level: LogLevel,
     /// Parsed timestamp from the log entry (if detected)
     pub timestamp: Option<DateTime<Local>>,
-    /// Source identifier (e.g., filename for multi-file tailing)
-    pub source: Option<String>,
+    /// Source identifier (e.g., filename for multi-file tailing).
+    /// Uses `Arc<str>` to avoid per-entry cloning overhead.
+    pub source: Option<Arc<str>>,
 }
 
 /// Timestamp field names to look for in JSON log entries.
@@ -176,7 +177,7 @@ fn plain_text_timestamp_regex() -> Option<&'static Regex> {
         // 2. Hyphen + space separator: no TZ suffix (naive local time)
         // 3. Slash + space separator: no TZ suffix (naive local time)
         Regex::new(
-            r"^((?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)|(?:\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?)|(?:\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?))",
+            r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?|\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?|\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?)",
         )
         .ok()
     })
@@ -191,8 +192,10 @@ fn extract_plain_text_timestamp(line: &str) -> Option<DateTime<Local>> {
 }
 
 /// Formats a timestamp as a human-readable relative time string (e.g., "3s ago", "2m ago").
-pub fn format_relative_time(dt: DateTime<Local>) -> String {
-    let now = Local::now();
+///
+/// Accepts `now` as a parameter so callers can batch the `Local::now()` call
+/// once per frame instead of once per entry.
+pub fn format_relative_time(dt: DateTime<Local>, now: DateTime<Local>) -> String {
     let diff = now.signed_duration_since(dt);
     let secs = diff.num_seconds();
     if secs < 0 {
@@ -624,35 +627,35 @@ mod tests {
     #[test]
     fn test_format_relative_seconds() {
         let dt = Local::now() - chrono::Duration::seconds(30);
-        let result = format_relative_time(dt);
+        let result = format_relative_time(dt, Local::now());
         assert!(result.contains("s ago"), "Expected seconds, got: {result}");
     }
 
     #[test]
     fn test_format_relative_minutes() {
         let dt = Local::now() - chrono::Duration::minutes(5);
-        let result = format_relative_time(dt);
+        let result = format_relative_time(dt, Local::now());
         assert!(result.contains("m ago"), "Expected minutes, got: {result}");
     }
 
     #[test]
     fn test_format_relative_hours() {
         let dt = Local::now() - chrono::Duration::hours(3);
-        let result = format_relative_time(dt);
+        let result = format_relative_time(dt, Local::now());
         assert!(result.contains("h ago"), "Expected hours, got: {result}");
     }
 
     #[test]
     fn test_format_relative_days() {
         let dt = Local::now() - chrono::Duration::days(2);
-        let result = format_relative_time(dt);
+        let result = format_relative_time(dt, Local::now());
         assert!(result.contains("d ago"), "Expected days, got: {result}");
     }
 
     #[test]
     fn test_format_relative_future() {
         let dt = Local::now() + chrono::Duration::hours(1);
-        let result = format_relative_time(dt);
+        let result = format_relative_time(dt, Local::now());
         assert_eq!(result, "future");
     }
 

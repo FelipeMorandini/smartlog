@@ -4,6 +4,7 @@
 
 use crate::app::{App, InputMode};
 use crate::parser::{format_relative_time, style_log, LogEntry};
+use chrono::{DateTime, Local};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
@@ -49,16 +50,21 @@ pub(crate) fn compute_raw_lines(text: &str) -> usize {
 /// Computes the display width of metadata prefix spans for a log entry.
 ///
 /// This accounts for the `[timestamp] ` and `[source] ` prefixes that
-/// `prepend_metadata` inserts before the log content.
-pub(crate) fn metadata_prefix_display_width(entry: &LogEntry, show_timestamps: bool) -> usize {
+/// `prepend_metadata` inserts before the log content. Accepts `now` so
+/// the caller can batch the `Local::now()` call once per frame.
+pub(crate) fn metadata_prefix_display_width(
+    entry: &LogEntry,
+    show_timestamps: bool,
+    now: DateTime<Local>,
+) -> usize {
     let mut width = 0;
     if let Some(ref src) = entry.source {
         // Prefix format: "[{src}] " -> '[' + src + ']' + ' '
-        width += 3 + UnicodeWidthStr::width(src.as_str());
+        width += 3 + UnicodeWidthStr::width(&**src);
     }
     if show_timestamps {
         if let Some(ts) = entry.timestamp {
-            let relative = format_relative_time(ts);
+            let relative = format_relative_time(ts, now);
             // Prefix format: "[{relative}] " -> '[' + relative + ']' + ' '
             width += 3 + UnicodeWidthStr::width(relative.as_str());
         }
@@ -78,6 +84,7 @@ fn compute_auto_scroll_entry(
     viewport_width: usize,
     line_wrap: bool,
     show_timestamps: bool,
+    now: DateTime<Local>,
 ) -> usize {
     if entries.is_empty() || viewport_height == 0 {
         return 0;
@@ -87,7 +94,7 @@ fn compute_auto_scroll_entry(
     let mut lines_used = 0usize;
     for (i, entry) in entries.iter().enumerate().rev() {
         let entry_lines = if line_wrap {
-            let prefix_w = metadata_prefix_display_width(entry, show_timestamps);
+            let prefix_w = metadata_prefix_display_width(entry, show_timestamps, now);
             compute_visual_lines(&entry.pretty, viewport_width, prefix_w)
         } else {
             compute_raw_lines(&entry.pretty)
@@ -154,7 +161,7 @@ fn build_status_title(app: &App, shown: usize, total: usize) -> String {
 }
 
 /// Prepends optional timestamp and source prefix spans to a styled log line.
-fn prepend_metadata(line: &mut Line<'static>, entry: &LogEntry, app: &App) {
+fn prepend_metadata(line: &mut Line<'static>, entry: &LogEntry, app: &App, now: DateTime<Local>) {
     // Source prefix (shown when entry has source metadata, e.g., multi-file)
     if let Some(ref src) = entry.source {
         line.spans.insert(
@@ -169,7 +176,7 @@ fn prepend_metadata(line: &mut Line<'static>, entry: &LogEntry, app: &App) {
     // Timestamp prefix (shown when toggle is active and entry has a timestamp)
     if app.show_timestamps {
         if let Some(ts) = entry.timestamp {
-            let relative = format_relative_time(ts);
+            let relative = format_relative_time(ts, now);
             line.spans.insert(
                 0,
                 Span::styled(
@@ -197,6 +204,7 @@ pub fn ui(f: &mut Frame, app: &App) {
     let filtered_logs = app.get_filtered_logs();
     let viewport_height = chunks[0].height.saturating_sub(2) as usize;
     let viewport_width = chunks[0].width.saturating_sub(2) as usize;
+    let now = Local::now();
 
     let scroll_entry = if app.auto_scroll {
         compute_auto_scroll_entry(
@@ -205,6 +213,7 @@ pub fn ui(f: &mut Frame, app: &App) {
             viewport_width,
             app.line_wrap,
             app.show_timestamps,
+            now,
         )
     } else {
         app.scroll.min(filtered_logs.len().saturating_sub(1))
@@ -214,7 +223,7 @@ pub fn ui(f: &mut Frame, app: &App) {
         .iter()
         .map(|log| {
             let mut line = style_log(log, highlight_query, &app.theme);
-            prepend_metadata(&mut line, log, app);
+            prepend_metadata(&mut line, log, app, now);
             line
         })
         .collect();
@@ -255,6 +264,11 @@ mod tests {
     use super::*;
     use crate::parser::LogLevel;
     use crate::theme::Theme;
+    use std::sync::Arc;
+
+    fn now() -> DateTime<Local> {
+        Local::now()
+    }
 
     fn entry(pretty: &str) -> LogEntry {
         LogEntry {
@@ -351,15 +365,15 @@ mod tests {
     #[test]
     fn test_metadata_prefix_display_width_no_metadata() {
         let e = entry("test");
-        assert_eq!(metadata_prefix_display_width(&e, false), 0);
+        assert_eq!(metadata_prefix_display_width(&e, false, now()), 0);
     }
 
     #[test]
     fn test_metadata_prefix_display_width_source_only() {
         let mut e = entry("test");
-        e.source = Some("app.log".to_string());
+        e.source = Some(Arc::from("app.log"));
         // "[app.log] " = 10 chars
-        assert_eq!(metadata_prefix_display_width(&e, false), 10);
+        assert_eq!(metadata_prefix_display_width(&e, false, now()), 10);
     }
 
     #[test]
@@ -367,7 +381,7 @@ mod tests {
         let mut e = entry("test");
         e.timestamp = Some(chrono::Local::now() - chrono::Duration::seconds(5));
         // "[5s ago] " = 9 chars (approx, depends on exact formatting)
-        let w = metadata_prefix_display_width(&e, true);
+        let w = metadata_prefix_display_width(&e, true, now());
         assert!(w > 0);
     }
 
@@ -376,23 +390,29 @@ mod tests {
         let mut e = entry("test");
         e.timestamp = Some(chrono::Local::now());
         // show_timestamps=false → timestamp not counted
-        assert_eq!(metadata_prefix_display_width(&e, false), 0);
+        assert_eq!(metadata_prefix_display_width(&e, false, now()), 0);
     }
 
     #[test]
     fn test_auto_scroll_with_metadata_prefix() {
         // Entry with source metadata — the prefix takes display width
         let mut e1 = entry("abcdefghij"); // 10 chars
-        e1.source = Some("app.log".to_string()); // adds "[app.log] " = 10 chars
+        e1.source = Some(Arc::from("app.log")); // adds "[app.log] " = 10 chars
         let mut e2 = entry("abcdefghij");
-        e2.source = Some("app.log".to_string());
+        e2.source = Some(Arc::from("app.log"));
         let entries: Vec<&LogEntry> = vec![&e1, &e2];
         // viewport width=20, with prefix each entry is 20 display width → 1 line each
         // viewport height=2 → both fit
-        assert_eq!(compute_auto_scroll_entry(&entries, 2, 20, true, false), 0);
+        assert_eq!(
+            compute_auto_scroll_entry(&entries, 2, 20, true, false, now()),
+            0
+        );
         // viewport width=15 → each entry is 20 width → ceil(20/15) = 2 lines each
         // viewport height=2 → only last entry fits
-        assert_eq!(compute_auto_scroll_entry(&entries, 2, 15, true, false), 1);
+        assert_eq!(
+            compute_auto_scroll_entry(&entries, 2, 15, true, false, now()),
+            1
+        );
     }
 
     // --- compute_raw_lines tests ---
@@ -417,7 +437,10 @@ mod tests {
     #[test]
     fn test_auto_scroll_empty_entries() {
         let entries: Vec<&LogEntry> = vec![];
-        assert_eq!(compute_auto_scroll_entry(&entries, 10, 80, true, false), 0);
+        assert_eq!(
+            compute_auto_scroll_entry(&entries, 10, 80, true, false, now()),
+            0
+        );
     }
 
     #[test]
@@ -425,7 +448,10 @@ mod tests {
         let e1 = entry("line1");
         let e2 = entry("line2");
         let entries: Vec<&LogEntry> = vec![&e1, &e2];
-        assert_eq!(compute_auto_scroll_entry(&entries, 10, 80, true, false), 0);
+        assert_eq!(
+            compute_auto_scroll_entry(&entries, 10, 80, true, false, now()),
+            0
+        );
     }
 
     #[test]
@@ -435,7 +461,10 @@ mod tests {
         let e3 = entry("line3");
         let e4 = entry("line4");
         let entries: Vec<&LogEntry> = vec![&e1, &e2, &e3, &e4];
-        assert_eq!(compute_auto_scroll_entry(&entries, 2, 80, true, false), 2);
+        assert_eq!(
+            compute_auto_scroll_entry(&entries, 2, 80, true, false, now()),
+            2
+        );
     }
 
     #[test]
@@ -445,21 +474,30 @@ mod tests {
         let e2 = entry(json);
         let e3 = entry(json);
         let entries: Vec<&LogEntry> = vec![&e1, &e2, &e3];
-        assert_eq!(compute_auto_scroll_entry(&entries, 5, 80, true, false), 2);
+        assert_eq!(
+            compute_auto_scroll_entry(&entries, 5, 80, true, false, now()),
+            2
+        );
     }
 
     #[test]
     fn test_auto_scroll_zero_viewport_height() {
         let e1 = entry("line1");
         let entries: Vec<&LogEntry> = vec![&e1];
-        assert_eq!(compute_auto_scroll_entry(&entries, 0, 80, true, false), 0);
+        assert_eq!(
+            compute_auto_scroll_entry(&entries, 0, 80, true, false, now()),
+            0
+        );
     }
 
     #[test]
     fn test_auto_scroll_single_oversized_entry() {
         let big = entry("a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no\np\nq\nr\ns\nt");
         let entries: Vec<&LogEntry> = vec![&big];
-        assert_eq!(compute_auto_scroll_entry(&entries, 3, 80, true, false), 0);
+        assert_eq!(
+            compute_auto_scroll_entry(&entries, 3, 80, true, false, now()),
+            0
+        );
     }
 
     #[test]
@@ -468,7 +506,10 @@ mod tests {
         let e2 = entry("short");
         let big = entry("a\nb\nc\nd\ne\nf\ng\nh\ni\nj");
         let entries: Vec<&LogEntry> = vec![&e1, &e2, &big];
-        assert_eq!(compute_auto_scroll_entry(&entries, 3, 80, true, false), 2);
+        assert_eq!(
+            compute_auto_scroll_entry(&entries, 3, 80, true, false, now()),
+            2
+        );
     }
 
     // --- no-wrap auto-scroll tests ---
@@ -478,8 +519,14 @@ mod tests {
         let e1 = entry("abcdefghij");
         let e2 = entry("klmnopqrst");
         let entries: Vec<&LogEntry> = vec![&e1, &e2];
-        assert_eq!(compute_auto_scroll_entry(&entries, 2, 5, true, false), 1);
-        assert_eq!(compute_auto_scroll_entry(&entries, 2, 5, false, false), 0);
+        assert_eq!(
+            compute_auto_scroll_entry(&entries, 2, 5, true, false, now()),
+            1
+        );
+        assert_eq!(
+            compute_auto_scroll_entry(&entries, 2, 5, false, false, now()),
+            0
+        );
     }
 
     #[test]
@@ -487,7 +534,10 @@ mod tests {
         let e1 = entry("a\nb\nc");
         let e2 = entry("d");
         let entries: Vec<&LogEntry> = vec![&e1, &e2];
-        assert_eq!(compute_auto_scroll_entry(&entries, 3, 80, false, false), 1);
+        assert_eq!(
+            compute_auto_scroll_entry(&entries, 3, 80, false, false, now()),
+            1
+        );
     }
 
     // --- build_status_title tests ---
@@ -564,7 +614,7 @@ mod tests {
         let app = App::new();
         let e = entry("test");
         let mut line = Line::from(Span::raw("test"));
-        prepend_metadata(&mut line, &e, &app);
+        prepend_metadata(&mut line, &e, &app, now());
         assert_eq!(line.spans.len(), 1);
     }
 
@@ -572,9 +622,9 @@ mod tests {
     fn test_prepend_metadata_with_source() {
         let app = App::new();
         let mut e = entry("test");
-        e.source = Some("app.log".to_string());
+        e.source = Some(Arc::from("app.log"));
         let mut line = Line::from(Span::raw("test"));
-        prepend_metadata(&mut line, &e, &app);
+        prepend_metadata(&mut line, &e, &app, now());
         assert_eq!(line.spans.len(), 2);
         assert!(line.spans[0].content.contains("app.log"));
     }
@@ -586,7 +636,7 @@ mod tests {
         let mut e = entry("test");
         e.timestamp = Some(chrono::Local::now() - chrono::Duration::seconds(1));
         let mut line = Line::from(Span::raw("test"));
-        prepend_metadata(&mut line, &e, &app);
+        prepend_metadata(&mut line, &e, &app, now());
         assert_eq!(line.spans.len(), 2);
         assert!(line.spans[0].content.contains("ago"));
     }
@@ -597,9 +647,9 @@ mod tests {
         app.show_timestamps = true;
         let mut e = entry("test");
         e.timestamp = Some(chrono::Local::now() - chrono::Duration::seconds(1));
-        e.source = Some("app.log".to_string());
+        e.source = Some(Arc::from("app.log"));
         let mut line = Line::from(Span::raw("test"));
-        prepend_metadata(&mut line, &e, &app);
+        prepend_metadata(&mut line, &e, &app, now());
         // timestamp first, then source, then content
         assert_eq!(line.spans.len(), 3);
         assert!(line.spans[0].content.contains("ago"));
@@ -612,7 +662,7 @@ mod tests {
         let mut e = entry("test");
         e.timestamp = Some(chrono::Local::now());
         let mut line = Line::from(Span::raw("test"));
-        prepend_metadata(&mut line, &e, &app);
+        prepend_metadata(&mut line, &e, &app, now());
         assert_eq!(line.spans.len(), 1); // no prefix added
     }
 }
