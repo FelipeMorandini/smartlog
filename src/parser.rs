@@ -368,6 +368,9 @@ fn highlight_regex(text: &str, re: &Regex, base_style: Style, theme: &Theme) -> 
     let mut last_end: usize = 0;
 
     for m in re.find_iter(text) {
+        if m.start() == m.end() {
+            continue;
+        }
         if m.start() > last_end {
             spans.push(Span::styled(
                 text[last_end..m.start()].to_string(),
@@ -844,6 +847,17 @@ mod tests {
         assert_eq!(line.spans.len(), 2);
         assert_eq!(line.spans[0].content.as_ref(), "HELLO");
         assert_eq!(line.spans[0].style.bg, Some(Color::Cyan));
+    }
+
+    #[test]
+    fn test_style_log_regex_zero_length_matches_skipped() {
+        // Word boundary `\b` can produce zero-length matches; they must be skipped.
+        let re = Regex::new(r"\b").unwrap();
+        let entry = test_entry("hello world", LogLevel::Info);
+        let line = style_log(&entry, &Highlight::Regex(&re), &Theme::DARK);
+        // No zero-length spans should be produced — falls back to single unstyled span.
+        assert_eq!(line.spans.len(), 1);
+        assert_eq!(line.spans[0].content.as_ref(), "hello world");
     }
 
     // --- LogLevel method tests ---

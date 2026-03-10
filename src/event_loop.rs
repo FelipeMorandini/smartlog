@@ -12,7 +12,7 @@ use ratatui::backend::Backend;
 use ratatui::Terminal;
 use std::{future::Future, io};
 use tokio::sync::mpsc;
-use tokio::time::{interval, Duration};
+use tokio::time::{interval, Duration, MissedTickBehavior};
 
 use crate::app::App;
 use crate::config::TIMESTAMP_REFRESH_INTERVAL_SECS;
@@ -148,6 +148,7 @@ pub async fn run<B: Backend>(
     let mut channel_open = true;
     let mut consecutive_event_errors: u32 = 0;
     let mut timestamp_tick = interval(Duration::from_secs(TIMESTAMP_REFRESH_INTERVAL_SECS));
+    timestamp_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     loop {
         terminal.draw(|f| ui(f, app))?;
