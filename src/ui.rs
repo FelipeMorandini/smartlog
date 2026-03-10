@@ -3,6 +3,7 @@
 //! This module handles all the terminal UI rendering using the Ratatui library.
 
 use crate::app::{App, InputMode};
+use crate::layout::entry_visual_lines;
 use crate::parser::{format_relative_time, style_log, Highlight, LogEntry};
 use chrono::{DateTime, Local};
 use ratatui::{
@@ -12,65 +13,6 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
-use unicode_width::UnicodeWidthStr;
-
-/// Computes the number of visual lines a text occupies when wrapped to a given width.
-///
-/// Uses `unicode-width` for accurate display width (CJK, wide glyphs).
-/// `prefix_width` is the display width of metadata prepended to the first line
-/// (e.g., timestamp and source labels). Only the first line is affected.
-pub(crate) fn compute_visual_lines(text: &str, width: usize, prefix_width: usize) -> usize {
-    if width == 0 {
-        return text.lines().count().max(1);
-    }
-    text.lines()
-        .enumerate()
-        .map(|(i, line)| {
-            let display_w = UnicodeWidthStr::width(line);
-            let total = if i == 0 {
-                display_w + prefix_width
-            } else {
-                display_w
-            };
-            if total == 0 {
-                1
-            } else {
-                total.div_ceil(width)
-            }
-        })
-        .sum::<usize>()
-        .max(1)
-}
-
-/// Counts the number of newline-separated lines in the text (no wrapping).
-pub(crate) fn compute_raw_lines(text: &str) -> usize {
-    text.lines().count().max(1)
-}
-
-/// Computes the display width of metadata prefix spans for a log entry.
-///
-/// This accounts for the `[timestamp] ` and `[source] ` prefixes that
-/// `prepend_metadata` inserts before the log content. Accepts `now` so
-/// the caller can batch the `Local::now()` call once per frame.
-pub(crate) fn metadata_prefix_display_width(
-    entry: &LogEntry,
-    show_timestamps: bool,
-    now: DateTime<Local>,
-) -> usize {
-    let mut width = 0;
-    if let Some(ref src) = entry.source {
-        // Prefix format: "[{src}] " -> '[' + src + ']' + ' '
-        width += 3 + UnicodeWidthStr::width(&**src);
-    }
-    if show_timestamps {
-        if let Some(ts) = entry.timestamp {
-            let relative = format_relative_time(ts, now);
-            // Prefix format: "[{relative}] " -> '[' + relative + ']' + ' '
-            width += 3 + UnicodeWidthStr::width(relative.as_str());
-        }
-    }
-    width
-}
 
 /// Finds the index of the first entry to display for auto-scroll.
 ///
@@ -93,13 +35,7 @@ fn compute_auto_scroll_entry(
     let last_index = entries.len() - 1;
     let mut lines_used = 0usize;
     for (i, entry) in entries.iter().enumerate().rev() {
-        let entry_lines = if line_wrap {
-            let prefix_w = metadata_prefix_display_width(entry, show_timestamps, now);
-            compute_visual_lines(&entry.pretty, viewport_width, prefix_w)
-        } else {
-            compute_raw_lines(&entry.pretty)
-        };
-        lines_used += entry_lines;
+        lines_used += entry_visual_lines(entry, viewport_width, line_wrap, show_timestamps, now);
         if lines_used > viewport_height {
             return (i + 1).min(last_index);
         }
@@ -290,118 +226,7 @@ mod tests {
         }
     }
 
-    // --- compute_visual_lines tests ---
-
-    #[test]
-    fn test_visual_lines_single_short_line() {
-        assert_eq!(compute_visual_lines("hello", 80, 0), 1);
-    }
-
-    #[test]
-    fn test_visual_lines_exact_width() {
-        assert_eq!(compute_visual_lines("abcde", 5, 0), 1);
-    }
-
-    #[test]
-    fn test_visual_lines_wraps_once() {
-        assert_eq!(compute_visual_lines("abcdef", 5, 0), 2);
-    }
-
-    #[test]
-    fn test_visual_lines_multiline_text() {
-        assert_eq!(compute_visual_lines("aaa\nbbb\nccc", 80, 0), 3);
-    }
-
-    #[test]
-    fn test_visual_lines_multiline_with_wrapping() {
-        assert_eq!(compute_visual_lines("abcdef\ngh", 5, 0), 3);
-    }
-
-    #[test]
-    fn test_visual_lines_empty_string() {
-        assert_eq!(compute_visual_lines("", 80, 0), 1);
-    }
-
-    #[test]
-    fn test_visual_lines_zero_width() {
-        assert_eq!(compute_visual_lines("abc\ndef", 0, 0), 2);
-    }
-
-    #[test]
-    fn test_visual_lines_pretty_json() {
-        let json = "{\n  \"level\": \"ERROR\",\n  \"msg\": \"fail\"\n}";
-        assert_eq!(compute_visual_lines(json, 40, 0), 4);
-    }
-
-    // --- TD-4: unicode width tests ---
-
-    #[test]
-    fn test_visual_lines_cjk_double_width() {
-        // Each CJK char is display width 2; 5 chars = 10 display width
-        // At width 10, should fit in 1 line
-        assert_eq!(compute_visual_lines("你好世界呀", 10, 0), 1);
-        // At width 6, 10 display units → ceil(10/6) = 2 lines
-        assert_eq!(compute_visual_lines("你好世界呀", 6, 0), 2);
-    }
-
-    #[test]
-    fn test_visual_lines_mixed_ascii_cjk() {
-        // "hi你好" = 2 + 4 = 6 display width
-        assert_eq!(compute_visual_lines("hi你好", 6, 0), 1);
-        assert_eq!(compute_visual_lines("hi你好", 5, 0), 2);
-    }
-
-    // --- TD-18: prefix width tests ---
-
-    #[test]
-    fn test_visual_lines_with_prefix_causes_wrap() {
-        // "abcde" = 5 chars, width = 5, no prefix → 1 line
-        assert_eq!(compute_visual_lines("abcde", 5, 0), 1);
-        // Same but with prefix_width=3 → first line total = 8 → ceil(8/5) = 2
-        assert_eq!(compute_visual_lines("abcde", 5, 3), 2);
-    }
-
-    #[test]
-    fn test_visual_lines_prefix_only_affects_first_line() {
-        // "abcde\nfgh" at width 5, prefix 3:
-        // first line: 5+3=8 → ceil(8/5) = 2
-        // second line: 3 → 1
-        // total = 3
-        assert_eq!(compute_visual_lines("abcde\nfgh", 5, 3), 3);
-        // Without prefix: first=ceil(5/5)=1, second=1, total=2
-        assert_eq!(compute_visual_lines("abcde\nfgh", 5, 0), 2);
-    }
-
-    #[test]
-    fn test_metadata_prefix_display_width_no_metadata() {
-        let e = entry("test");
-        assert_eq!(metadata_prefix_display_width(&e, false, now()), 0);
-    }
-
-    #[test]
-    fn test_metadata_prefix_display_width_source_only() {
-        let mut e = entry("test");
-        e.source = Some(Arc::from("app.log"));
-        // "[app.log] " = 10 chars
-        assert_eq!(metadata_prefix_display_width(&e, false, now()), 10);
-    }
-
-    #[test]
-    fn test_metadata_prefix_display_width_timestamp_only() {
-        let mut e = entry("test");
-        e.timestamp = Some(chrono::Local::now() - chrono::Duration::seconds(5));
-        // "[5s ago] " = 9 chars (approx, depends on exact formatting)
-        let w = metadata_prefix_display_width(&e, true, now());
-        assert!(w > 0);
-    }
-
-    #[test]
-    fn test_metadata_prefix_display_width_timestamp_disabled() {
-        let mut e = entry("test");
-        e.timestamp = Some(chrono::Local::now());
-        // show_timestamps=false → timestamp not counted
-        assert_eq!(metadata_prefix_display_width(&e, false, now()), 0);
-    }
+    // --- compute_auto_scroll_entry tests ---
 
     #[test]
     fn test_auto_scroll_with_metadata_prefix() {
@@ -424,25 +249,6 @@ mod tests {
             1
         );
     }
-
-    // --- compute_raw_lines tests ---
-
-    #[test]
-    fn test_raw_lines_single() {
-        assert_eq!(compute_raw_lines("hello"), 1);
-    }
-
-    #[test]
-    fn test_raw_lines_multiline() {
-        assert_eq!(compute_raw_lines("a\nb\nc"), 3);
-    }
-
-    #[test]
-    fn test_raw_lines_empty() {
-        assert_eq!(compute_raw_lines(""), 1);
-    }
-
-    // --- compute_auto_scroll_entry tests ---
 
     #[test]
     fn test_auto_scroll_empty_entries() {

@@ -7,6 +7,7 @@ pub mod app;
 pub mod config;
 pub mod event_loop;
 pub mod inputs;
+pub mod layout;
 pub mod parser;
 pub mod sources;
 pub mod terminal;
