@@ -3,7 +3,7 @@
 //! This module handles all the terminal UI rendering using the Ratatui library.
 
 use crate::app::{App, InputMode};
-use crate::parser::{format_relative_time, style_log, LogEntry};
+use crate::parser::{format_relative_time, style_log, Highlight, LogEntry};
 use chrono::{DateTime, Local};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -188,6 +188,17 @@ fn prepend_metadata(line: &mut Line<'static>, entry: &LogEntry, app: &App, now: 
     }
 }
 
+/// Builds the appropriate highlight mode from the current app state.
+fn build_highlight(app: &App) -> Highlight<'_> {
+    if let Some(re) = app.highlight_regex() {
+        Highlight::Regex(re)
+    } else if !app.input_buffer.is_empty() {
+        Highlight::Substring(&app.input_buffer)
+    } else {
+        Highlight::None
+    }
+}
+
 /// Renders the application UI to the terminal.
 ///
 /// The UI consists of two sections:
@@ -199,8 +210,7 @@ pub fn ui(f: &mut Frame, app: &App) {
         .constraints([Constraint::Min(1), Constraint::Length(3)])
         .split(f.area());
 
-    // In regex mode, skip substring highlighting (regex highlight is tracked in TD-7)
-    let highlight_query = if app.use_regex { "" } else { &app.input_buffer };
+    let highlight = build_highlight(app);
     let filtered_logs = app.get_filtered_logs();
     let viewport_height = chunks[0].height.saturating_sub(2) as usize;
     let viewport_width = chunks[0].width.saturating_sub(2) as usize;
@@ -222,7 +232,7 @@ pub fn ui(f: &mut Frame, app: &App) {
     let styled_logs: Vec<_> = filtered_logs[scroll_entry..]
         .iter()
         .map(|log| {
-            let mut line = style_log(log, highlight_query, &app.theme);
+            let mut line = style_log(log, &highlight, &app.theme);
             prepend_metadata(&mut line, log, app, now);
             line
         })

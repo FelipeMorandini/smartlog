@@ -86,6 +86,15 @@ fn test_multiple_file_flags_accepted() {
 }
 
 #[test]
+fn test_help_shows_debug_log_flag() {
+    smartlog()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--debug-log"));
+}
+
+#[test]
 fn test_file_flag_with_nonexistent_path_exits_gracefully() {
     // Argument parsing succeeds; the process exits non-zero because either
     // terminal init fails (Linux/macOS CI) or the test harness timeout kills

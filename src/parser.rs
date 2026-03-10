@@ -281,17 +281,23 @@ pub fn parse_log(line: String) -> LogEntry {
     }
 }
 
-/// Styles a log entry for terminal display with syntax highlighting.
+/// The type of search highlighting to apply.
+pub enum Highlight<'a> {
+    /// No highlighting
+    None,
+    /// Case-insensitive substring match
+    Substring(&'a str),
+    /// Pre-compiled regex for match-span extraction
+    Regex(&'a Regex),
+}
+
+/// Styles a log entry with level-based coloring and optional search highlighting.
 ///
-/// Colors the log based on its severity level using the provided theme,
-/// and highlights any matches to the search query.
-///
-/// # Arguments
-///
-/// * `entry` - The log entry to style
-/// * `search_query` - Text to highlight (case-insensitive)
-/// * `theme` - Color theme to use for styling
-pub fn style_log(entry: &LogEntry, search_query: &str, theme: &Theme) -> Line<'static> {
+/// Accepts a `Highlight` to determine how matches are found and highlighted:
+/// - `Substring`: char-based case-insensitive matching (safe for Unicode)
+/// - `Regex`: uses `find_iter()` for byte-accurate match spans
+/// - `None`: no highlighting, just level coloring
+pub fn style_log(entry: &LogEntry, highlight: &Highlight<'_>, theme: &Theme) -> Line<'static> {
     let base_color = match entry.level {
         LogLevel::Error => theme.error,
         LogLevel::Warn => theme.warn,
@@ -302,17 +308,21 @@ pub fn style_log(entry: &LogEntry, search_query: &str, theme: &Theme) -> Line<'s
 
     let base_style = Style::default().fg(base_color);
 
-    if search_query.is_empty() {
-        return Line::from(Span::styled(entry.pretty.clone(), base_style));
+    match *highlight {
+        Highlight::None => Line::from(Span::styled(entry.pretty.clone(), base_style)),
+        Highlight::Substring(query) => highlight_substring(&entry.pretty, query, base_style, theme),
+        Highlight::Regex(re) => highlight_regex(&entry.pretty, re, base_style, theme),
     }
+}
 
-    // Use char-based matching to avoid UTF-8 byte boundary panics.
-    let content_chars: Vec<char> = entry.pretty.chars().collect();
-    let content_lower: Vec<char> = entry.pretty.to_lowercase().chars().collect();
-    let query_lower: Vec<char> = search_query.to_lowercase().chars().collect();
+/// Highlights substring matches using char-based case-insensitive matching.
+fn highlight_substring(text: &str, query: &str, base_style: Style, theme: &Theme) -> Line<'static> {
+    let content_chars: Vec<char> = text.chars().collect();
+    let content_lower: Vec<char> = text.to_lowercase().chars().collect();
+    let query_lower: Vec<char> = query.to_lowercase().chars().collect();
 
     if content_chars.len() != content_lower.len() || query_lower.is_empty() {
-        return Line::from(Span::styled(entry.pretty.clone(), base_style));
+        return Line::from(Span::styled(text.to_string(), base_style));
     }
 
     let highlight_style = Style::default()
@@ -345,6 +355,44 @@ pub fn style_log(entry: &LogEntry, search_query: &str, theme: &Theme) -> Line<'s
     }
 
     Line::from(spans)
+}
+
+/// Highlights regex matches using byte-accurate `find_iter()` spans.
+fn highlight_regex(text: &str, re: &Regex, base_style: Style, theme: &Theme) -> Line<'static> {
+    let highlight_style = Style::default()
+        .fg(theme.highlight_fg)
+        .bg(theme.highlight_bg)
+        .add_modifier(Modifier::BOLD);
+
+    let mut spans = Vec::new();
+    let mut last_end: usize = 0;
+
+    for m in re.find_iter(text) {
+        if m.start() == m.end() {
+            continue;
+        }
+        if m.start() > last_end {
+            spans.push(Span::styled(
+                text[last_end..m.start()].to_string(),
+                base_style,
+            ));
+        }
+        spans.push(Span::styled(
+            text[m.start()..m.end()].to_string(),
+            highlight_style,
+        ));
+        last_end = m.end();
+    }
+
+    if last_end < text.len() {
+        spans.push(Span::styled(text[last_end..].to_string(), base_style));
+    }
+
+    if spans.is_empty() {
+        Line::from(Span::styled(text.to_string(), base_style))
+    } else {
+        Line::from(spans)
+    }
 }
 
 #[cfg(test)]
@@ -664,7 +712,7 @@ mod tests {
     #[test]
     fn test_style_log_no_query_returns_single_span() {
         let entry = test_entry("test", LogLevel::Info);
-        let line = style_log(&entry, "", &Theme::DARK);
+        let line = style_log(&entry, &Highlight::None, &Theme::DARK);
         assert_eq!(line.spans.len(), 1);
         assert_eq!(line.spans[0].style.fg, Some(Color::Green));
     }
@@ -672,7 +720,7 @@ mod tests {
     #[test]
     fn test_style_log_highlight_match() {
         let entry = test_entry("hello world", LogLevel::Unknown);
-        let line = style_log(&entry, "world", &Theme::DARK);
+        let line = style_log(&entry, &Highlight::Substring("world"), &Theme::DARK);
         assert_eq!(line.spans.len(), 2);
         assert_eq!(line.spans[1].style.bg, Some(Color::Cyan));
     }
@@ -680,7 +728,7 @@ mod tests {
     #[test]
     fn test_style_log_case_insensitive_highlight() {
         let entry = test_entry("Hello World", LogLevel::Unknown);
-        let line = style_log(&entry, "HELLO", &Theme::DARK);
+        let line = style_log(&entry, &Highlight::Substring("HELLO"), &Theme::DARK);
         assert!(!line.spans.is_empty());
         assert_eq!(line.spans[0].style.bg, Some(Color::Cyan));
     }
@@ -688,7 +736,7 @@ mod tests {
     #[test]
     fn test_style_log_no_match() {
         let entry = test_entry("hello", LogLevel::Info);
-        let line = style_log(&entry, "xyz", &Theme::DARK);
+        let line = style_log(&entry, &Highlight::Substring("xyz"), &Theme::DARK);
         assert_eq!(line.spans.len(), 1);
         assert_eq!(line.spans[0].style.fg, Some(Color::Green));
     }
@@ -696,13 +744,13 @@ mod tests {
     #[test]
     fn test_style_log_unicode_no_panic() {
         let entry = test_entry("Hallo Welt! Schon", LogLevel::Info);
-        let _line = style_log(&entry, "welt", &Theme::DARK);
+        let _line = style_log(&entry, &Highlight::Substring("welt"), &Theme::DARK);
     }
 
     #[test]
     fn test_style_log_multiple_matches() {
         let entry = test_entry("abcabc", LogLevel::Unknown);
-        let line = style_log(&entry, "abc", &Theme::DARK);
+        let line = style_log(&entry, &Highlight::Substring("abc"), &Theme::DARK);
         assert_eq!(line.spans.len(), 2);
         assert_eq!(line.spans[0].style.bg, Some(Color::Cyan));
         assert_eq!(line.spans[1].style.bg, Some(Color::Cyan));
@@ -711,36 +759,105 @@ mod tests {
     #[test]
     fn test_style_log_error_color() {
         let entry = test_entry("err", LogLevel::Error);
-        let line = style_log(&entry, "", &Theme::DARK);
+        let line = style_log(&entry, &Highlight::None, &Theme::DARK);
         assert_eq!(line.spans[0].style.fg, Some(Color::Red));
     }
 
     #[test]
     fn test_style_log_warn_color() {
         let entry = test_entry("w", LogLevel::Warn);
-        let line = style_log(&entry, "", &Theme::DARK);
+        let line = style_log(&entry, &Highlight::None, &Theme::DARK);
         assert_eq!(line.spans[0].style.fg, Some(Color::Yellow));
     }
 
     #[test]
     fn test_style_log_debug_color() {
         let entry = test_entry("d", LogLevel::Debug);
-        let line = style_log(&entry, "", &Theme::DARK);
+        let line = style_log(&entry, &Highlight::None, &Theme::DARK);
         assert_eq!(line.spans[0].style.fg, Some(Color::Blue));
     }
 
     #[test]
     fn test_style_log_with_light_theme() {
         let entry = test_entry("test", LogLevel::Unknown);
-        let line = style_log(&entry, "", &Theme::LIGHT);
+        let line = style_log(&entry, &Highlight::None, &Theme::LIGHT);
         assert_eq!(line.spans[0].style.fg, Some(Color::DarkGray));
     }
 
     #[test]
     fn test_style_log_highlight_with_dracula_theme() {
         let entry = test_entry("hello world", LogLevel::Info);
-        let line = style_log(&entry, "world", &Theme::DRACULA);
+        let line = style_log(&entry, &Highlight::Substring("world"), &Theme::DRACULA);
         assert_eq!(line.spans[1].style.bg, Some(Color::LightMagenta));
+    }
+
+    // --- Regex highlight tests ---
+
+    #[test]
+    fn test_style_log_regex_highlight_digits() {
+        let re = Regex::new(r"(?i)\d+").unwrap();
+        let entry = test_entry("error code 42 occurred", LogLevel::Error);
+        let line = style_log(&entry, &Highlight::Regex(&re), &Theme::DARK);
+        // "error code " + "42" (highlighted) + " occurred"
+        assert_eq!(line.spans.len(), 3);
+        assert_eq!(line.spans[1].content.as_ref(), "42");
+        assert_eq!(line.spans[1].style.bg, Some(Color::Cyan));
+    }
+
+    #[test]
+    fn test_style_log_regex_highlight_multiple_matches() {
+        let re = Regex::new(r"(?i)\d+").unwrap();
+        let entry = test_entry("port 8080 retry 3", LogLevel::Info);
+        let line = style_log(&entry, &Highlight::Regex(&re), &Theme::DARK);
+        // "port " + "8080" + " retry " + "3"
+        assert_eq!(line.spans.len(), 4);
+        assert_eq!(line.spans[1].content.as_ref(), "8080");
+        assert_eq!(line.spans[1].style.bg, Some(Color::Cyan));
+        assert_eq!(line.spans[3].content.as_ref(), "3");
+        assert_eq!(line.spans[3].style.bg, Some(Color::Cyan));
+    }
+
+    #[test]
+    fn test_style_log_regex_no_match() {
+        let re = Regex::new(r"(?i)zzz").unwrap();
+        let entry = test_entry("hello world", LogLevel::Info);
+        let line = style_log(&entry, &Highlight::Regex(&re), &Theme::DARK);
+        assert_eq!(line.spans.len(), 1);
+        assert_eq!(line.spans[0].style.fg, Some(Color::Green));
+    }
+
+    #[test]
+    fn test_style_log_regex_alternation() {
+        let re = Regex::new(r"(?i)error|warn").unwrap();
+        let entry = test_entry("error then warn", LogLevel::Error);
+        let line = style_log(&entry, &Highlight::Regex(&re), &Theme::DARK);
+        // "error" + " then " + "warn"
+        assert_eq!(line.spans.len(), 3);
+        assert_eq!(line.spans[0].content.as_ref(), "error");
+        assert_eq!(line.spans[0].style.bg, Some(Color::Cyan));
+        assert_eq!(line.spans[2].content.as_ref(), "warn");
+        assert_eq!(line.spans[2].style.bg, Some(Color::Cyan));
+    }
+
+    #[test]
+    fn test_style_log_regex_case_insensitive() {
+        let re = Regex::new(r"(?i)hello").unwrap();
+        let entry = test_entry("HELLO world", LogLevel::Info);
+        let line = style_log(&entry, &Highlight::Regex(&re), &Theme::DARK);
+        assert_eq!(line.spans.len(), 2);
+        assert_eq!(line.spans[0].content.as_ref(), "HELLO");
+        assert_eq!(line.spans[0].style.bg, Some(Color::Cyan));
+    }
+
+    #[test]
+    fn test_style_log_regex_zero_length_matches_skipped() {
+        // Word boundary `\b` can produce zero-length matches; they must be skipped.
+        let re = Regex::new(r"\b").unwrap();
+        let entry = test_entry("hello world", LogLevel::Info);
+        let line = style_log(&entry, &Highlight::Regex(&re), &Theme::DARK);
+        // No zero-length spans should be produced — falls back to single unstyled span.
+        assert_eq!(line.spans.len(), 1);
+        assert_eq!(line.spans[0].content.as_ref(), "hello world");
     }
 
     // --- LogLevel method tests ---

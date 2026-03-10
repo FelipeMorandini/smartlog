@@ -260,6 +260,14 @@ impl App {
         matches!(self.cached_matcher, TextMatcher::Invalid)
     }
 
+    /// Returns a reference to the cached regex, if the matcher is in regex mode.
+    pub fn highlight_regex(&self) -> Option<&Regex> {
+        match &self.cached_matcher {
+            TextMatcher::Regex(re) => Some(re),
+            _ => None,
+        }
+    }
+
     /// Compiles a text matcher from the current input buffer and mode.
     fn compile_matcher(&self) -> TextMatcher {
         if self.input_buffer.is_empty() {
@@ -919,5 +927,39 @@ mod tests {
         app.rebuild_matcher();
         assert!(app.is_regex_invalid());
         assert_eq!(app.get_filtered_count(), 0);
+    }
+
+    // --- highlight_regex tests ---
+
+    #[test]
+    fn test_highlight_regex_returns_some_in_regex_mode() {
+        let mut app = App::new();
+        app.use_regex = true;
+        app.input_buffer = r"\d+".to_string();
+        app.rebuild_matcher();
+        assert!(app.highlight_regex().is_some());
+    }
+
+    #[test]
+    fn test_highlight_regex_returns_none_in_substring_mode() {
+        let mut app = App::new();
+        app.input_buffer = "hello".to_string();
+        app.rebuild_matcher();
+        assert!(app.highlight_regex().is_none());
+    }
+
+    #[test]
+    fn test_highlight_regex_returns_none_for_invalid() {
+        let mut app = App::new();
+        app.use_regex = true;
+        app.input_buffer = "[bad".to_string();
+        app.rebuild_matcher();
+        assert!(app.highlight_regex().is_none());
+    }
+
+    #[test]
+    fn test_highlight_regex_returns_none_when_empty() {
+        let app = App::new();
+        assert!(app.highlight_regex().is_none());
     }
 }

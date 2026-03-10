@@ -134,11 +134,11 @@ tail -f /var/log/app.log | smartlog
 3. Press `Enter` to apply filter and return to normal mode
 4. Press `ESC` to clear the filter and return to normal mode
 
-Matching text is highlighted with a cyan background for easy visibility.
+Matching text is highlighted with a cyan background for easy visibility. Highlighting works in both substring and regex modes.
 
 ### Regex Filtering
 
-Press `r` to toggle regex mode. When active, the filter input is treated as a regular expression (case-insensitive). Invalid regex patterns are indicated in the status bar.
+Press `r` to toggle regex mode. When active, the filter input is treated as a regular expression (case-insensitive). Regex matches are highlighted in the log output, supporting patterns like `\d+`, `error|warn`, etc. Invalid regex patterns are indicated in the status bar.
 
 ### Log Level Filtering
 
@@ -150,11 +150,11 @@ Press `e` to export the currently filtered logs to a file. The file is saved as 
 
 ### Debug Logging
 
-Use `--verbose` (or `-v`) to enable debug logging. Diagnostic output is written to `smartlog_debug.log` in the current directory. This is useful for troubleshooting SmartLog itself.
+Use `--verbose` (or `-v`) to enable debug logging. Diagnostic output is written to `smartlog_debug.log` in the current directory by default. Use `--debug-log <PATH>` to write to a custom location. This is useful for troubleshooting SmartLog itself.
 
 ### Relative Timestamps
 
-Press `t` to toggle relative timestamp display. When enabled, each log entry with a detected timestamp shows a prefix like `[3s ago]`, `[5m ago]`, or `[2h ago]`. Timestamps are extracted from:
+Press `t` to toggle relative timestamp display. When enabled, each log entry with a detected timestamp shows a prefix like `[3s ago]`, `[5m ago]`, or `[2h ago]`. The display auto-refreshes every 30 seconds to keep values current while idle. Timestamps are extracted from:
 - **JSON logs**: `timestamp`, `ts`, `time`, `@timestamp`, `datetime`, `date` fields (ISO 8601 strings or Unix epoch seconds/milliseconds/microseconds)
 - **Plain text logs**: ISO 8601 or common date/time patterns at the beginning of the line, including `YYYY-MM-DD` and `YYYY/MM/DD` formats (e.g., `2024-01-15T10:30:45Z`, `2024-01-15 10:30:45`, `2024/01/15 10:30:45`)
 

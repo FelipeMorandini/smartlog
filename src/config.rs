@@ -34,3 +34,9 @@ pub const MAX_INPUT_BUFFER_SIZE: usize = 256;
 /// This determines how frequently we check for new content in tailed files.
 /// Lower values = more responsive but higher CPU usage.
 pub const FILE_POLL_INTERVAL_MS: u64 = 500;
+
+/// Interval in seconds for refreshing relative timestamp display.
+///
+/// When relative timestamps are enabled (`t` key), this determines how often
+/// the UI redraws to keep displayed times (e.g., "3m ago") fresh while idle.
+pub const TIMESTAMP_REFRESH_INTERVAL_SECS: u64 = 30;
