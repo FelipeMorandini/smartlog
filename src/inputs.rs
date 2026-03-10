@@ -2,7 +2,7 @@
 
 use crate::app::{App, InputMode};
 use crate::config::MAX_INPUT_BUFFER_SIZE;
-use crate::ui::{compute_raw_lines, compute_visual_lines, metadata_prefix_display_width};
+use crate::layout::entry_visual_lines;
 use chrono::{DateTime, Local};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 
@@ -23,16 +23,11 @@ fn page_entries_forward(
     let mut lines = 0;
     let mut count = 0;
     for entry in &filtered[start..] {
-        let entry_lines = if app.line_wrap {
-            let pw = metadata_prefix_display_width(entry, app.show_timestamps, now);
-            compute_visual_lines(&entry.pretty, width, pw)
-        } else {
-            compute_raw_lines(&entry.pretty)
-        };
-        if lines + entry_lines > height && count > 0 {
+        let el = entry_visual_lines(entry, width, app.line_wrap, app.show_timestamps, now);
+        if lines + el > height && count > 0 {
             break;
         }
-        lines += entry_lines;
+        lines += el;
         count += 1;
     }
     count.max(1)
@@ -55,16 +50,11 @@ fn page_entries_backward(
     let mut lines = 0;
     let mut count = 0;
     for entry in filtered[..=end].iter().rev() {
-        let entry_lines = if app.line_wrap {
-            let pw = metadata_prefix_display_width(entry, app.show_timestamps, now);
-            compute_visual_lines(&entry.pretty, width, pw)
-        } else {
-            compute_raw_lines(&entry.pretty)
-        };
-        if lines + entry_lines > height && count > 0 {
+        let el = entry_visual_lines(entry, width, app.line_wrap, app.show_timestamps, now);
+        if lines + el > height && count > 0 {
             break;
         }
-        lines += entry_lines;
+        lines += el;
         count += 1;
     }
     count.max(1)
