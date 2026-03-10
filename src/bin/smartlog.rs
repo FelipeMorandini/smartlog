@@ -31,6 +31,10 @@ struct Args {
     #[arg(short, long)]
     verbose: bool,
 
+    /// Path for the debug log file (requires --verbose)
+    #[arg(long, value_name = "PATH")]
+    debug_log: Option<PathBuf>,
+
     /// Color theme: dark, light, solarized, dracula (default: dark)
     #[arg(long, value_name = "THEME", default_value = "dark")]
     theme: String,
@@ -59,18 +63,21 @@ fn source_label(files: &[String]) -> String {
 
 /// Initializes the tracing subscriber for debug logging.
 ///
-/// When `verbose` is true, logs to `smartlog_debug.log` in the current directory.
+/// When `verbose` is true, logs to the given path (defaulting to
+/// `smartlog_debug.log` in the current directory).
 /// When false, no subscriber is installed (zero overhead).
-fn init_tracing(verbose: bool) -> Result<()> {
+fn init_tracing(verbose: bool, debug_log: Option<&std::path::Path>) -> Result<()> {
     if verbose {
-        let file = std::fs::File::create("smartlog_debug.log")
-            .context("Failed to create smartlog_debug.log")?;
+        let default_path = PathBuf::from("smartlog_debug.log");
+        let path = debug_log.unwrap_or(&default_path);
+        let file = std::fs::File::create(path)
+            .with_context(|| format!("Failed to create debug log: {}", path.display()))?;
         tracing_subscriber::fmt()
             .with_writer(file)
             .with_max_level(tracing::Level::TRACE)
             .with_ansi(false)
             .init();
-        tracing::info!("SmartLog debug logging enabled");
+        tracing::info!(path = %path.display(), "SmartLog debug logging enabled");
     }
     Ok(())
 }
@@ -80,7 +87,7 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     // 0. Initialize tracing (before anything else)
-    init_tracing(args.verbose)?;
+    init_tracing(args.verbose, args.debug_log.as_deref())?;
 
     // 1. Setup Terminal
     let (mut terminal, _guard) = terminal::init()?;
