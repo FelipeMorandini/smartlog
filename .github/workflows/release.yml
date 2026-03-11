@@ -143,3 +143,101 @@ jobs:
           files: artifacts/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-crates:
+    name: Publish to crates.io
+    needs: validate-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish to crates.io
+        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  update-homebrew:
+    name: Update Homebrew formula
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v4
+        with:
+          repository: felipemorandini/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Download release assets and compute SHA256
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          TAG="${GITHUB_REF_NAME}"
+          BASE="https://github.com/felipemorandini/smartlog/releases/download/${TAG}"
+
+          for target in aarch64-apple-darwin x86_64-apple-darwin aarch64-unknown-linux-musl x86_64-unknown-linux-musl; do
+            curl -sL "${BASE}/smartlog-${target}.tar.gz" -o "${target}.tar.gz"
+            sha=$(sha256sum "${target}.tar.gz" | cut -d' ' -f1)
+            echo "SHA_${target//-/_}=${sha}" >> "$GITHUB_ENV"
+          done
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Write updated formula
+        shell: bash
+        run: |
+          cat > homebrew-tap/Formula/smartlog.rb << 'FORMULA'
+          class Smartlog < Formula
+            desc "A high-performance TUI for log tailing with JSON auto-detection and real-time filtering"
+            homepage "https://github.com/felipemorandini/smartlog"
+            version "__VERSION__"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/felipemorandini/smartlog/releases/download/v__VERSION__/smartlog-aarch64-apple-darwin.tar.gz"
+                sha256 "__SHA_AARCH64_DARWIN__"
+              else
+                url "https://github.com/felipemorandini/smartlog/releases/download/v__VERSION__/smartlog-x86_64-apple-darwin.tar.gz"
+                sha256 "__SHA_X86_64_DARWIN__"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/felipemorandini/smartlog/releases/download/v__VERSION__/smartlog-aarch64-unknown-linux-musl.tar.gz"
+                sha256 "__SHA_AARCH64_LINUX__"
+              else
+                url "https://github.com/felipemorandini/smartlog/releases/download/v__VERSION__/smartlog-x86_64-unknown-linux-musl.tar.gz"
+                sha256 "__SHA_X86_64_LINUX__"
+              end
+            end
+
+            def install
+              bin.install "smartlog"
+            end
+
+            test do
+              assert_match "smartlog", shell_output("#{bin}/smartlog --version")
+            end
+          end
+          FORMULA
+
+          # Remove leading whitespace from heredoc
+          sed -i 's/^          //' homebrew-tap/Formula/smartlog.rb
+          # Substitute placeholders
+          sed -i "s/__VERSION__/${VERSION}/g" homebrew-tap/Formula/smartlog.rb
+          sed -i "s/__SHA_AARCH64_DARWIN__/${SHA_aarch64_apple_darwin}/g" homebrew-tap/Formula/smartlog.rb
+          sed -i "s/__SHA_X86_64_DARWIN__/${SHA_x86_64_apple_darwin}/g" homebrew-tap/Formula/smartlog.rb
+          sed -i "s/__SHA_AARCH64_LINUX__/${SHA_aarch64_unknown_linux_musl}/g" homebrew-tap/Formula/smartlog.rb
+          sed -i "s/__SHA_X86_64_LINUX__/${SHA_x86_64_unknown_linux_musl}/g" homebrew-tap/Formula/smartlog.rb
+
+      - name: Commit and push formula
+        run: |
+          cd homebrew-tap
+          git config user.name "Felipe Pires Morandini"
+          git config user.email "felipepiresmorandini@gmail.com"
+          git add Formula/smartlog.rb
+          git diff --cached --quiet && exit 0
+          git commit -m "smartlog: update to v${VERSION}"
+          git push

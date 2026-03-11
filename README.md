@@ -26,7 +26,19 @@ Built with Rust • Async I/O with Tokio • Beautiful TUI with Ratatui.
 
 ## 🚀 Installation
 
-### Pre-built Binaries (Recommended)
+### Homebrew (macOS & Linux)
+
+```bash
+brew install felipemorandini/tap/smartlog
+```
+
+### Cargo (crates.io)
+
+```bash
+cargo install smartlog
+```
+
+### Pre-built Binaries
 
 Download the latest release for your platform from the [Releases](https://github.com/felipemorandini/smartlog/releases) page:
 
@@ -62,15 +74,9 @@ Download [`smartlog-x86_64-pc-windows-msvc.zip`](https://github.com/felipemorand
 
 Download [`smartlog-aarch64-pc-windows-msvc.zip`](https://github.com/felipemorandini/smartlog/releases/latest/download/smartlog-aarch64-pc-windows-msvc.zip), extract, and add `smartlog.exe` to your PATH.
 
-### Using Cargo
-
-If you have Rust installed:
-
-```bash
-cargo install --git https://github.com/felipemorandini/smartlog
-```
-
 ### Building from Source
+
+Requires Rust 1.74.0 or later.
 
 ```bash
 git clone https://github.com/felipemorandini/smartlog
@@ -80,6 +86,8 @@ cargo build --release
 ```
 
 ## 🔧 Quick Start
+
+Run `smartlog --help` to see all available options.
 
 Tail a specific log file:
 
