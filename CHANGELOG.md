@@ -7,13 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-03-18
+
 ### Added
 
-- CHANGELOG.md following Keep a Changelog format
 - Shell completions subcommand via `clap_complete` (bash, zsh, fish, elvish, powershell)
+- CHANGELOG.md following Keep a Changelog format
 - AUR package (PKGBUILD) for Arch Linux installation
 - Winget manifest for Windows package manager installation
 - Debian package (.deb) support via cargo-deb in release workflow
+- Project roadmap (ROADMAP.md)
 
 ## [0.5.0] - 2026-02-28
 
@@ -162,7 +165,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI/CD with cross-platform builds (6 targets)
 - Homebrew formula auto-update in release workflow
 
-[Unreleased]: https://github.com/felipemorandini/smartlog/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/felipemorandini/smartlog/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/felipemorandini/smartlog/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/felipemorandini/smartlog/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/felipemorandini/smartlog/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/felipemorandini/smartlog/compare/v0.4.0...v0.4.1
