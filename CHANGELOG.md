@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-03-18
+
+### Added
+
+- Automated AUR package updates in release workflow (`update-aur` job)
+- Registered `smartlog-bin` on the AUR
+
+### Changed
+
+- Updated PKGBUILD version to 0.6.0
+- Hardened AUR CI job: pinned host key via `ssh-keyscan`, `curl --fail` with retries
+
 ## [0.6.0] - 2026-03-18
 
 ### Added
@@ -165,7 +177,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI/CD with cross-platform builds (6 targets)
 - Homebrew formula auto-update in release workflow
 
-[Unreleased]: https://github.com/felipemorandini/smartlog/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/felipemorandini/smartlog/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/felipemorandini/smartlog/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/felipemorandini/smartlog/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/felipemorandini/smartlog/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/felipemorandini/smartlog/compare/v0.4.1...v0.4.2
