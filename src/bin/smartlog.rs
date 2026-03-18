@@ -4,7 +4,8 @@
 //! spawns the log ingestion task, and runs the main event loop.
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::Shell;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
 
@@ -38,6 +39,19 @@ struct Args {
     /// Color theme: dark, light, solarized, dracula (default: dark)
     #[arg(long, value_name = "THEME", default_value = "dark")]
     theme: String,
+
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+/// Available subcommands
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Generate shell completions for the specified shell
+    Completions {
+        /// Shell to generate completions for
+        shell: Shell,
+    },
 }
 
 /// Derives a human-readable source label from CLI args and stdin state.
@@ -85,6 +99,14 @@ fn init_tracing(verbose: bool, debug_log: Option<&std::path::Path>) -> Result<()
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+
+    // Handle completions subcommand (no TUI needed)
+    if let Some(Command::Completions { shell }) = &args.command {
+        let mut cmd = Args::command();
+        let name = cmd.get_name().to_string();
+        clap_complete::generate(*shell, &mut cmd, name, &mut std::io::stdout());
+        return Ok(());
+    }
 
     // 0. Initialize tracing (before anything else)
     init_tracing(args.verbose, args.debug_log.as_deref())?;

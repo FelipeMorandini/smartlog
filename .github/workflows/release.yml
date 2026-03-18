@@ -120,9 +120,63 @@ jobs:
           name: smartlog-${{ matrix.target }}
           path: smartlog-${{ matrix.target }}.*
 
+  build-deb:
+    needs: validate-version
+    name: Build .deb (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            arch: amd64
+          - target: aarch64-unknown-linux-musl
+            arch: arm64
+            cross: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: deb-${{ matrix.target }}
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --version 3.6.3 --locked
+
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --version 0.2.5 --locked
+
+      - name: Install musl tools
+        if: "!matrix.cross"
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build (cross)
+        if: matrix.cross
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Build (native)
+        if: "!matrix.cross"
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package .deb
+        run: cargo deb --no-build --target ${{ matrix.target }}
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: smartlog-deb-${{ matrix.arch }}
+          path: target/${{ matrix.target }}/debian/*.deb
+
   release:
     name: Create Release
-    needs: build
+    needs: [build, build-deb]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
