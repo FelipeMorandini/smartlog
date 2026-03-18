@@ -317,11 +317,16 @@ jobs:
       - name: Install wingetcreate
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://aka.ms/wingetcreate/latest" -OutFile wingetcreate.exe
+          $ErrorActionPreference = 'Stop'
+          Invoke-WebRequest -Uri "https://aka.ms/wingetcreate/latest/self-contained" -OutFile wingetcreate.exe
+          if (-not (Test-Path wingetcreate.exe)) { throw "Failed to download wingetcreate" }
 
       - name: Update and submit manifest
         shell: pwsh
+        env:
+          WINGET_PAT: ${{ secrets.WINGET_PAT }}
         run: |
+          $ErrorActionPreference = 'Stop'
           $version = "${{ github.ref_name }}".TrimStart("v")
           $x64Url = "https://github.com/felipemorandini/smartlog/releases/download/${{ github.ref_name }}/smartlog-x86_64-pc-windows-msvc.zip"
           $arm64Url = "https://github.com/felipemorandini/smartlog/releases/download/${{ github.ref_name }}/smartlog-aarch64-pc-windows-msvc.zip"
@@ -329,7 +334,7 @@ jobs:
             --version $version `
             --urls $x64Url $arm64Url `
             --submit `
-            --token ${{ secrets.WINGET_PAT }}
+            --token $env:WINGET_PAT
 
   update-homebrew:
     name: Update Homebrew formula
