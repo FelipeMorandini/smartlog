@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-03-18
+
+### Added
+
+- Automated Winget manifest updates in release workflow (`update-winget` job)
+- Submitted initial manifest to microsoft/winget-pkgs
+- Updated Winget manifests with real SHA256 hashes
+
 ## [0.6.1] - 2026-03-18
 
 ### Added
@@ -177,7 +185,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI/CD with cross-platform builds (6 targets)
 - Homebrew formula auto-update in release workflow
 
-[Unreleased]: https://github.com/felipemorandini/smartlog/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/felipemorandini/smartlog/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/felipemorandini/smartlog/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/felipemorandini/smartlog/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/felipemorandini/smartlog/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/felipemorandini/smartlog/compare/v0.4.2...v0.5.0
