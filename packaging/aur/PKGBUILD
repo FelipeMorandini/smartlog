@@ -11,21 +11,23 @@ license=('MIT')
 provides=('smartlog')
 conflicts=('smartlog')
 
-source_x86_64=("${url}/releases/download/v${pkgver}/smartlog-x86_64-unknown-linux-musl.tar.gz")
-source_aarch64=("${url}/releases/download/v${pkgver}/smartlog-aarch64-unknown-linux-musl.tar.gz")
+source_x86_64=("${url}/releases/download/v${pkgver}/smartlog-x86_64-unknown-linux-musl.tar.gz"
+               "${url}/raw/v${pkgver}/LICENSE")
+source_aarch64=("${url}/releases/download/v${pkgver}/smartlog-aarch64-unknown-linux-musl.tar.gz"
+                "${url}/raw/v${pkgver}/LICENSE")
 
 # Update these checksums with: updpkgsums
-sha256sums_x86_64=('SKIP')
-sha256sums_aarch64=('SKIP')
+sha256sums_x86_64=('SKIP' 'SKIP')
+sha256sums_aarch64=('SKIP' 'SKIP')
 
 package() {
     install -Dm755 smartlog "${pkgdir}/usr/bin/smartlog"
-    install -Dm644 /dev/null "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+    install -Dm644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 
     # Generate and install shell completions
-    "${srcdir}/smartlog" completions bash > smartlog.bash 2>/dev/null || true
-    "${srcdir}/smartlog" completions zsh > _smartlog 2>/dev/null || true
-    "${srcdir}/smartlog" completions fish > smartlog.fish 2>/dev/null || true
+    "${srcdir}/smartlog" completions bash > smartlog.bash || echo "WARNING: bash completions generation failed"
+    "${srcdir}/smartlog" completions zsh > _smartlog || echo "WARNING: zsh completions generation failed"
+    "${srcdir}/smartlog" completions fish > smartlog.fish || echo "WARNING: fish completions generation failed"
 
     if [ -s smartlog.bash ]; then
         install -Dm644 smartlog.bash "${pkgdir}/usr/share/bash-completion/completions/smartlog"

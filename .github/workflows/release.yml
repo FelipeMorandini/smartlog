@@ -147,7 +147,7 @@ jobs:
           key: deb-${{ matrix.target }}
 
       - name: Install cargo-deb
-        run: cargo install cargo-deb --locked
+        run: cargo install cargo-deb --version 3.6.3 --locked
 
       - name: Install cross
         if: matrix.cross
