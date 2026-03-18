@@ -21,6 +21,7 @@ path = "src/bin/smartlog.rs"
 anyhow = "1.0.100"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 clap = { version = "4.5.53", features = ["derive"] }
+clap_complete = "4"
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 futures-util = "0.3"
 ratatui = "0.29.0"
@@ -34,6 +35,17 @@ tracing-subscriber = { version = "0.3", features = ["fmt"] }
 [dev-dependencies]
 assert_cmd = "2"
 predicates = "3"
+
+[package.metadata.deb]
+maintainer = "Felipe Pires Morandini <felipepiresmorandini@gmail.com>"
+section = "utils"
+priority = "optional"
+assets = [
+    ["target/release/smartlog", "usr/bin/", "755"],
+]
+extended-description = """\
+A high-performance TUI for log tailing. Auto-detects JSON, syntax highlights \
+errors, and filters streams in real-time. Built in Rust."""
 
 [profile.release]
 opt-level = 3

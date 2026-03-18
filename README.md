@@ -32,6 +32,31 @@ Built with Rust • Async I/O with Tokio • Beautiful TUI with Ratatui.
 brew install felipemorandini/tap/smartlog
 ```
 
+### AUR (Arch Linux)
+
+```bash
+# Using an AUR helper (e.g., yay, paru)
+yay -S smartlog-bin
+```
+
+### Winget (Windows)
+
+```powershell
+winget install FelipeMorandini.smartlog
+```
+
+### Debian/Ubuntu (.deb)
+
+Download the `.deb` package for your architecture from [GitHub Releases](https://github.com/felipemorandini/smartlog/releases):
+
+```bash
+# x86_64
+sudo dpkg -i smartlog_0.5.0-1_amd64.deb
+
+# ARM64
+sudo dpkg -i smartlog_0.5.0-1_arm64.deb
+```
+
 ### Cargo (crates.io)
 
 ```bash
@@ -112,6 +137,27 @@ tail -f /var/log/app.log | smartlog
 - When using `--file`, SmartLog tails from the end of the file and follows new lines (similar to `tail -f`). If the file is truncated/rotated, it continues from the beginning of the new file.
 - When no `--file` is provided, SmartLog automatically reads from stdin if it is piped; otherwise it starts a demo stream.
 - Press Ctrl+C to exit gracefully. On Unix, receiving SIGTERM also exits gracefully and restores the terminal state.
+
+## 🐚 Shell Completions
+
+Generate tab-completion scripts for your shell:
+
+```bash
+smartlog completions <SHELL>
+```
+
+Supported shells: `bash`, `zsh`, `fish`, `elvish`, `powershell`.
+
+```bash
+# Bash
+smartlog completions bash > /etc/bash_completion.d/smartlog
+
+# Zsh (add to your fpath)
+smartlog completions zsh > ~/.zfunc/_smartlog
+
+# Fish
+smartlog completions fish > ~/.config/fish/completions/smartlog.fish
+```
 
 ## ⌨️ Keyboard Shortcuts
 
