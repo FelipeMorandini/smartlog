@@ -14,12 +14,12 @@
 - [x] Register `smartlog-bin` on the AUR and push initial PKGBUILD
 - [x] Automate AUR updates in the release workflow (`update-aur` job in `release.yml`)
 
-### 6.3 Winget Manifest (Windows) — PARTIALLY DONE
+### 6.3 Winget Manifest (Windows) — DONE
 - [x] Create a manifest (v1.6.0 schema) pointing to the GitHub Release `.zip` assets
 - [x] Add `winget install` instructions to README
-- [ ] Compute real SHA256 hashes for current release assets
-- [ ] Submit initial PR to [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs)
-- [ ] Automate manifest updates via [wingetcreate](https://github.com/microsoft/winget-create) in the release workflow
+- [x] Compute real SHA256 hashes for current release assets
+- [x] Submit initial PR to [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs)
+- [x] Automate manifest updates via `wingetcreate` in the release workflow (`update-winget` job)
 
 ### 6.4 CHANGELOG.md — DONE
 - [x] Create a `CHANGELOG.md` following [Keep a Changelog](https://keepachangelog.com) format
@@ -34,10 +34,7 @@
 
 ## Remaining Work
 
-| Priority | Item | Effort | Description |
-|----------|------|--------|-------------|
-| Medium | Winget submission | Small | Compute checksums, submit initial PR to winget-pkgs |
-| Medium | Winget automation | Medium | Add `wingetcreate` step to release workflow for auto-submission |
+All distribution channels are complete. No remaining work.
 
 ## Completed Distribution Channels
 
@@ -48,4 +45,4 @@
 | crates.io | Yes | Published on release |
 | Debian .deb (x86_64 + ARM64) | Yes | Built and attached to release |
 | AUR (Arch Linux) | Yes | `update-aur` job in release.yml, `AUR_SSH_KEY` secret configured |
-| Winget (Windows) | No | Template in `packaging/winget/`, manual submission |
+| Winget (Windows) | Yes | `update-winget` job in release.yml, `WINGET_PAT` secret configured |

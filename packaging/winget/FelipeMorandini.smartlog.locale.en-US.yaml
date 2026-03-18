@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
 
 PackageIdentifier: FelipeMorandini.smartlog
-PackageVersion: 0.5.0
+PackageVersion: 0.6.1
 PackageLocale: en-US
 Publisher: Felipe Pires Morandini
 PublisherUrl: https://github.com/felipemorandini
