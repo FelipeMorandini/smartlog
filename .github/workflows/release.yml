@@ -211,6 +211,104 @@ jobs:
       - name: Publish to crates.io
         run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
+  update-aur:
+    name: Update AUR package
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH for AUR
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.AUR_SSH_KEY }}" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+          cat >> ~/.ssh/config << 'EOF'
+          Host aur.archlinux.org
+            IdentityFile ~/.ssh/aur
+            User aur
+            StrictHostKeyChecking yes
+          EOF
+          chmod 600 ~/.ssh/config
+
+      - name: Download release assets and compute SHA256
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          TAG="${GITHUB_REF_NAME}"
+          BASE="https://github.com/felipemorandini/smartlog/releases/download/${TAG}"
+
+          curl -fSL --retry 3 "${BASE}/smartlog-x86_64-unknown-linux-musl.tar.gz" -o x86_64.tar.gz
+          curl -fSL --retry 3 "${BASE}/smartlog-aarch64-unknown-linux-musl.tar.gz" -o aarch64.tar.gz
+          curl -fSL --retry 3 "https://raw.githubusercontent.com/felipemorandini/smartlog/${TAG}/LICENSE" -o LICENSE
+
+          SHA_X86_64=$(sha256sum x86_64.tar.gz | cut -d' ' -f1)
+          SHA_AARCH64=$(sha256sum aarch64.tar.gz | cut -d' ' -f1)
+          SHA_LICENSE=$(sha256sum LICENSE | cut -d' ' -f1)
+
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "SHA_X86_64=${SHA_X86_64}" >> "$GITHUB_ENV"
+          echo "SHA_AARCH64=${SHA_AARCH64}" >> "$GITHUB_ENV"
+          echo "SHA_LICENSE=${SHA_LICENSE}" >> "$GITHUB_ENV"
+
+      - name: Clone AUR repo and update PKGBUILD
+        run: |
+          git clone ssh://aur@aur.archlinux.org/smartlog-bin.git aur-repo
+          cp packaging/aur/PKGBUILD aur-repo/PKGBUILD
+
+          cd aur-repo
+
+          # Update version
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+
+          # Update checksums
+          sed -i "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${SHA_X86_64}' '${SHA_LICENSE}')/" PKGBUILD
+          sed -i "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('${SHA_AARCH64}' '${SHA_LICENSE}')/" PKGBUILD
+
+          # Remove the SKIP comment if present
+          sed -i '/^# Update these checksums with: updpkgsums/d' PKGBUILD
+
+          # Generate .SRCINFO (makepkg is not available on Ubuntu)
+          # .SRCINFO uses tab indentation for fields under pkgbase/pkgname
+          TAB=$'\t'
+          URL="https://github.com/felipemorandini/smartlog"
+          {
+            echo "pkgbase = smartlog-bin"
+            echo "${TAB}pkgdesc = A high-performance TUI for log tailing with JSON auto-detection and real-time filtering"
+            echo "${TAB}pkgver = ${VERSION}"
+            echo "${TAB}pkgrel = 1"
+            echo "${TAB}url = ${URL}"
+            echo "${TAB}arch = x86_64"
+            echo "${TAB}arch = aarch64"
+            echo "${TAB}license = MIT"
+            echo "${TAB}provides = smartlog"
+            echo "${TAB}conflicts = smartlog"
+            echo "${TAB}source_x86_64 = ${URL}/releases/download/v${VERSION}/smartlog-x86_64-unknown-linux-musl.tar.gz"
+            echo "${TAB}source_x86_64 = ${URL}/raw/v${VERSION}/LICENSE"
+            echo "${TAB}sha256sums_x86_64 = ${SHA_X86_64}"
+            echo "${TAB}sha256sums_x86_64 = ${SHA_LICENSE}"
+            echo "${TAB}source_aarch64 = ${URL}/releases/download/v${VERSION}/smartlog-aarch64-unknown-linux-musl.tar.gz"
+            echo "${TAB}source_aarch64 = ${URL}/raw/v${VERSION}/LICENSE"
+            echo "${TAB}sha256sums_aarch64 = ${SHA_AARCH64}"
+            echo "${TAB}sha256sums_aarch64 = ${SHA_LICENSE}"
+            echo ""
+            echo "pkgname = smartlog-bin"
+          } > .SRCINFO
+
+      - name: Push to AUR
+        run: |
+          cd aur-repo
+          git config user.name "Felipe Pires Morandini"
+          git config user.email "felipepiresmorandini@gmail.com"
+          git add PKGBUILD .SRCINFO
+          git diff --cached --quiet && echo "No changes to push" && exit 0
+          git commit -m "Update to v${VERSION}"
+          git push
+
   update-homebrew:
     name: Update Homebrew formula
     needs: release

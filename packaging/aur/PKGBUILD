@@ -2,7 +2,7 @@
 # https://github.com/felipemorandini/smartlog
 
 pkgname=smartlog-bin
-pkgver=0.5.0
+pkgver=0.6.0
 pkgrel=1
 pkgdesc="A high-performance TUI for log tailing with JSON auto-detection and real-time filtering"
 arch=('x86_64' 'aarch64')
