@@ -88,6 +88,9 @@ jobs:
       - name: Build (native)
         if: "!matrix.cross"
         run: cargo build --release --target ${{ matrix.target }}
+        env:
+          # Statically link the C runtime on Windows to avoid vcruntime140.dll dependency
+          RUSTFLAGS: ${{ contains(matrix.target, 'windows') && '-C target-feature=+crt-static' || '' }}
 
       # Package as tar.gz for Linux and macOS
       - name: Package (tar.gz)
