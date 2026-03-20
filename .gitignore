@@ -29,3 +29,6 @@ target
 
 .claude/
 CLAUDE.md
+
+# MkDocs build output
+site/
