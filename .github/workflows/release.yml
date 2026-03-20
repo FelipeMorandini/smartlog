@@ -315,29 +315,117 @@ jobs:
   update-winget:
     name: Update Winget manifest
     needs: release
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
-      - name: Install wingetcreate
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Invoke-WebRequest -Uri "https://aka.ms/wingetcreate/latest/self-contained" -OutFile wingetcreate.exe
-          if (-not (Test-Path wingetcreate.exe)) { throw "Failed to download wingetcreate" }
-
-      - name: Update and submit manifest
-        shell: pwsh
+      - name: Create and submit manifest
         env:
           WINGET_PAT: ${{ secrets.WINGET_PAT }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $version = "${{ github.ref_name }}".TrimStart("v")
-          $x64Url = "https://github.com/felipemorandini/smartlog/releases/download/${{ github.ref_name }}/smartlog-x86_64-pc-windows-msvc.zip"
-          $arm64Url = "https://github.com/felipemorandini/smartlog/releases/download/${{ github.ref_name }}/smartlog-aarch64-pc-windows-msvc.zip"
-          .\wingetcreate.exe update FelipeMorandini.smartlog `
-            --version $version `
-            --urls $x64Url $arm64Url `
-            --submit `
-            --token $env:WINGET_PAT
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          PKG_ID="FelipeMorandini.smartlog"
+          MANIFEST_DIR="manifests/f/FelipeMorandini/smartlog/${VERSION}"
+
+          X64_URL="https://github.com/felipemorandini/smartlog/releases/download/${GITHUB_REF_NAME}/smartlog-x86_64-pc-windows-msvc.zip"
+          ARM64_URL="https://github.com/felipemorandini/smartlog/releases/download/${GITHUB_REF_NAME}/smartlog-aarch64-pc-windows-msvc.zip"
+
+          # Download and compute SHA256
+          curl -fSL -o x64.zip "$X64_URL"
+          curl -fSL -o arm64.zip "$ARM64_URL"
+          X64_SHA=$(sha256sum x64.zip | awk '{print toupper($1)}')
+          ARM64_SHA=$(sha256sum arm64.zip | awk '{print toupper($1)}')
+          rm -f x64.zip arm64.zip
+
+          # Clone winget-pkgs fork
+          git clone --depth 1 "https://x-access-token:${WINGET_PAT}@github.com/FelipeMorandini/winget-pkgs.git"
+          cd winget-pkgs
+
+          # Sync fork with upstream
+          git remote add upstream https://github.com/microsoft/winget-pkgs.git
+          git fetch upstream master
+          git checkout -b "${PKG_ID}-${VERSION}" upstream/master
+
+          mkdir -p "$MANIFEST_DIR"
+
+          cat > "${MANIFEST_DIR}/${PKG_ID}.yaml" << EOF
+          # yaml-language-server: \$schema=https://aka.ms/winget-manifest.version.1.6.0.schema.json
+
+          PackageIdentifier: ${PKG_ID}
+          PackageVersion: ${VERSION}
+          DefaultLocale: en-US
+          ManifestType: version
+          ManifestVersion: 1.6.0
+          EOF
+
+          cat > "${MANIFEST_DIR}/${PKG_ID}.installer.yaml" << EOF
+          # yaml-language-server: \$schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+
+          PackageIdentifier: ${PKG_ID}
+          PackageVersion: ${VERSION}
+          InstallerType: zip
+          NestedInstallerType: portable
+          NestedInstallerFiles:
+            - RelativeFilePath: smartlog.exe
+              PortableCommandAlias: smartlog
+          Installers:
+            - Architecture: x64
+              InstallerUrl: ${X64_URL}
+              InstallerSha256: ${X64_SHA}
+            - Architecture: arm64
+              InstallerUrl: ${ARM64_URL}
+              InstallerSha256: ${ARM64_SHA}
+          ManifestType: installer
+          ManifestVersion: 1.6.0
+          EOF
+
+          cat > "${MANIFEST_DIR}/${PKG_ID}.locale.en-US.yaml" << EOF
+          # yaml-language-server: \$schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+
+          PackageIdentifier: ${PKG_ID}
+          PackageVersion: ${VERSION}
+          PackageLocale: en-US
+          Publisher: Felipe Pires Morandini
+          PublisherUrl: https://github.com/felipemorandini
+          PackageName: smartlog
+          PackageUrl: https://github.com/felipemorandini/smartlog
+          License: MIT
+          LicenseUrl: https://github.com/felipemorandini/smartlog/blob/main/LICENSE
+          ShortDescription: A high-performance TUI for log tailing with JSON auto-detection and real-time filtering
+          Tags:
+            - tui
+            - log
+            - tail
+            - json
+            - viewer
+            - rust
+          Moniker: smartlog
+          ManifestType: defaultLocale
+          ManifestVersion: 1.6.0
+          EOF
+
+          # Remove leading whitespace from heredocs
+          sed -i 's/^          //' "${MANIFEST_DIR}/"*.yaml
+
+          git config user.name "Felipe Pires Morandini"
+          git config user.email "felipepiresmorandini@gmail.com"
+          git add "$MANIFEST_DIR"
+          git commit -m "New package: ${PKG_ID} version ${VERSION}"
+          git push -u "https://x-access-token:${WINGET_PAT}@github.com/FelipeMorandini/winget-pkgs.git" HEAD
+
+          # Create PR
+          curl -fSL -X POST \
+            -H "Authorization: token ${WINGET_PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/microsoft/winget-pkgs/pulls" \
+            -d "$(cat <<PREOF
+          {
+            "title": "New package: ${PKG_ID} version ${VERSION}",
+            "body": "### New package submission\n\n- **Package identifier:** ${PKG_ID}\n- **Package version:** ${VERSION}\n- **Package URL:** https://github.com/felipemorandini/smartlog\n\nA high-performance TUI for log tailing with JSON auto-detection and real-time filtering.",
+            "head": "FelipeMorandini:${PKG_ID}-${VERSION}",
+            "base": "master"
+          }
+          PREOF
+          )"
 
   update-homebrew:
     name: Update Homebrew formula
