@@ -122,6 +122,7 @@ jobs:
         with:
           name: smartlog-${{ matrix.target }}
           path: smartlog-${{ matrix.target }}.*
+          retention-days: 7
 
   build-deb:
     needs: validate-version
@@ -176,6 +177,7 @@ jobs:
         with:
           name: smartlog-deb-${{ matrix.arch }}
           path: target/${{ matrix.target }}/debian/*.deb
+          retention-days: 7
 
   release:
     name: Create Release
